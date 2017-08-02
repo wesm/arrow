@@ -40,13 +40,14 @@ cd /arrow/python
 # PyArrow build configuration
 export PYARROW_BUILD_TYPE='release'
 export PYARROW_WITH_PARQUET=1
-export PYARROW_WITH_PLASMA=1
 export PYARROW_BUNDLE_ARROW_CPP=1
 # Need as otherwise arrow_io is sometimes not linked
 export LDFLAGS="-Wl,--no-as-needed"
 export PKG_CONFIG_PATH=/arrow-dist/lib64/pkgconfig
 # Ensure the target directory exists
 mkdir -p /io/dist
+
+export SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0.post1
 
 for PYTHON in ${PYTHON_VERSIONS}; do
     PYTHON_INTERPRETER="$(cpython_path $PYTHON)/bin/python"
@@ -58,7 +59,7 @@ for PYTHON in ${PYTHON_VERSIONS}; do
     ARROW_BUILD_DIR=/arrow/cpp/build-PY${PYTHON}
     mkdir -p "${ARROW_BUILD_DIR}"
     pushd "${ARROW_BUILD_DIR}"
-    PATH="$(cpython_path $PYTHON)/bin:$PATH" cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/arrow-dist -DARROW_BUILD_TESTS=OFF -DARROW_BUILD_SHARED=ON -DARROW_BOOST_USE_SHARED=OFF -DARROW_JEMALLOC=ON -DARROW_RPATH_ORIGIN=ON -DARROW_JEMALLOC_USE_SHARED=OFF -DARROW_PYTHON=ON -DPythonInterp_FIND_VERSION=${PYTHON} -DARROW_PLASMA=ON ..
+    PATH="$(cpython_path $PYTHON)/bin:$PATH" cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/arrow-dist -DARROW_BUILD_TESTS=OFF -DARROW_BUILD_SHARED=ON -DARROW_BOOST_USE_SHARED=OFF -DARROW_JEMALLOC=ON -DARROW_RPATH_ORIGIN=ON -DARROW_JEMALLOC_USE_SHARED=OFF -DARROW_PYTHON=ON -DPythonInterp_FIND_VERSION=${PYTHON} ..
     make -j5 install
     popd
 
@@ -71,7 +72,6 @@ for PYTHON in ${PYTHON_VERSIONS}; do
     echo "=== (${PYTHON}) Test the existence of optional modules ==="
     $PIPI_IO -r requirements.txt
     PATH="$PATH:$(cpython_path $PYTHON)/bin" $PYTHON_INTERPRETER -c "import pyarrow.parquet"
-    PATH="$PATH:$(cpython_path $PYTHON)/bin" $PYTHON_INTERPRETER -c "import pyarrow.plasma"
 
     echo "=== (${PYTHON}) Tag the wheel with manylinux1 ==="
     mkdir -p repaired_wheels/
@@ -80,10 +80,7 @@ for PYTHON in ${PYTHON_VERSIONS}; do
     echo "=== (${PYTHON}) Testing manylinux1 wheel ==="
     source /venv-test-${PYTHON}/bin/activate
     pip install repaired_wheels/*.whl
-
-    # ARROW-1264; for some reason the test case added causes a segfault inside
-    # the Docker container when writing and error message to stderr
-    py.test --parquet /venv-test-${PYTHON}/lib/*/site-packages/pyarrow -v -s --disable-plasma
+    py.test --parquet /venv-test-${PYTHON}/lib/*/site-packages/pyarrow
     deactivate
 
     mv repaired_wheels/*.whl /io/dist

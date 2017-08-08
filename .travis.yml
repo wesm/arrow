@@ -38,11 +38,6 @@ addons:
 services:
   - docker
 
-cache:
-  ccache: true
-  directories:
-    - $HOME/.conda_packages
-
 matrix:
   fast_finish: true
   allow_failures:

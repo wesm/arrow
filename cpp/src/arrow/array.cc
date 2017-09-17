@@ -603,28 +603,6 @@ Status MakeArray(const std::shared_ptr<ArrayData>& data, std::shared_ptr<Array>*
   return VisitTypeInline(*data->type, &wrapper_visitor);
 }
 
-#ifndef ARROW_NO_DEPRECATED_API
-// \deprecated Since 0.7.0
-Status MakePrimitiveArray(const std::shared_ptr<DataType>& type, int64_t length,
-                          const std::shared_ptr<Buffer>& data,
-                          const std::shared_ptr<Buffer>& null_bitmap, int64_t null_count,
-                          int64_t offset, std::shared_ptr<Array>* out) {
-  BufferVector buffers = {null_bitmap, data};
-  auto internal_data =
-      std::make_shared<ArrayData>(type, length, std::move(buffers), null_count, offset);
-  return MakeArray(internal_data, out);
-}
-
-Status MakePrimitiveArray(const std::shared_ptr<DataType>& type,
-                          const std::vector<std::shared_ptr<Buffer>>& buffers,
-                          int64_t length, int64_t null_count, int64_t offset,
-                          std::shared_ptr<Array>* out) {
-  auto internal_data =
-      std::make_shared<ArrayData>(type, length, buffers, null_count, offset);
-  return MakeArray(internal_data, out);
-}
-#endif
-
 // ----------------------------------------------------------------------
 // Instantiate templates
 

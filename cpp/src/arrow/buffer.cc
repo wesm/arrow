@@ -132,14 +132,6 @@ Status AllocateBuffer(MemoryPool* pool, const int64_t size,
   return Status::OK();
 }
 
-Status AllocateBuffer(MemoryPool* pool, const int64_t size,
-                      std::shared_ptr<MutableBuffer>* out) {
-  std::shared_ptr<Buffer> buffer;
-  RETURN_NOT_OK(AllocateBuffer(pool, size, &buffer));
-  *out = std::dynamic_pointer_cast<MutableBuffer>(buffer);
-  return Status::OK();
-}
-
 Status AllocateResizableBuffer(MemoryPool* pool, const int64_t size,
                                std::shared_ptr<ResizableBuffer>* out) {
   auto buffer = std::make_shared<PoolBuffer>(pool);

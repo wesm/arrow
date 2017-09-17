@@ -483,21 +483,6 @@ Status RecordBatchStreamReader::Open(const std::shared_ptr<io::InputStream>& str
   return Open(std::move(message_reader), out);
 }
 
-#ifndef ARROW_NO_DEPRECATED_API
-Status RecordBatchStreamReader::Open(std::unique_ptr<MessageReader> message_reader,
-                                     std::shared_ptr<RecordBatchStreamReader>* reader) {
-  // Private ctor
-  *reader = std::shared_ptr<RecordBatchStreamReader>(new RecordBatchStreamReader());
-  return (*reader)->impl_->Open(std::move(message_reader));
-}
-
-Status RecordBatchStreamReader::Open(const std::shared_ptr<io::InputStream>& stream,
-                                     std::shared_ptr<RecordBatchStreamReader>* out) {
-  std::unique_ptr<MessageReader> message_reader(new InputStreamMessageReader(stream));
-  return Open(std::move(message_reader), out);
-}
-#endif
-
 std::shared_ptr<Schema> RecordBatchStreamReader::schema() const {
   return impl_->schema();
 }
@@ -722,13 +707,6 @@ Status ReadRecordBatch(const std::shared_ptr<Schema>& schema, io::InputStream* f
   io::BufferReader buffer_reader(message->body());
   return ReadRecordBatch(*message->metadata(), schema, kMaxNestingDepth, &buffer_reader,
                          out);
-}
-
-// Deprecated
-Status ReadRecordBatch(const std::shared_ptr<Schema>& schema, int64_t offset,
-                       io::RandomAccessFile* file, std::shared_ptr<RecordBatch>* out) {
-  RETURN_NOT_OK(file->Seek(offset));
-  return ReadRecordBatch(schema, file, out);
 }
 
 Status ReadTensor(int64_t offset, io::RandomAccessFile* file,

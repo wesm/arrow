@@ -673,24 +673,6 @@ ARROW_EXTERN_TEMPLATE NumericArray<TimestampType>;
 ARROW_EXPORT
 Status ValidateArray(const Array& array);
 
-#ifndef ARROW_NO_DEPRECATED_API
-// \deprecated Since 0.7.0
-
-/// Create new arrays for logical types that are backed by primitive arrays.
-ARROW_EXPORT
-Status MakePrimitiveArray(const std::shared_ptr<DataType>& type, int64_t length,
-                          const std::shared_ptr<Buffer>& data,
-                          const std::shared_ptr<Buffer>& null_bitmap, int64_t null_count,
-                          int64_t offset, std::shared_ptr<Array>* out);
-
-ARROW_EXPORT
-Status MakePrimitiveArray(const std::shared_ptr<DataType>& type,
-                          const std::vector<std::shared_ptr<Buffer>>& buffers,
-                          int64_t length, int64_t null_count, int64_t offset,
-                          std::shared_ptr<Array>* out);
-
-#endif
-
 }  // namespace arrow
 
 #endif  // ARROW_ARRAY_H

@@ -330,13 +330,6 @@ ARROW_EXPORT
 Status AllocateResizableBuffer(MemoryPool* pool, const int64_t size,
                                std::shared_ptr<ResizableBuffer>* out);
 
-#ifndef ARROW_NO_DEPRECATED_API
-/// \deprecated Since 0.7.0
-ARROW_EXPORT
-Status AllocateBuffer(MemoryPool* pool, const int64_t size,
-                      std::shared_ptr<MutableBuffer>* out);
-#endif
-
 }  // namespace arrow
 
 #endif  // ARROW_BUFFER_H

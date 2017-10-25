@@ -58,25 +58,11 @@ def get_issues_for_version(version):
 
 LINK_TEMPLATE = '[{0}](https://issues.apache.org/jira/browse/{0})'
 
-
-def format_changelog_markdown(issues, out):
-    issues_by_type = defaultdict(list)
-    for issue in issues:
-        issues_by_type[issue.fields.issuetype.name].append(issue)
-
-    for issue_type, issue_group in sorted(issues_by_type.items()):
-        issue_group.sort(key=lambda x: x.key)
-
-        out.write('## {0}\n\n'.format(issue_type))
-        for issue in issue_group:
-            out.write('* {0} - {1}\n'.format(issue.key,
-                                             issue.fields.summary))
-        out.write('\n')
+NEW_FEATURE = 'New Features and Improvements'
+BUGFIX = 'Bug Fixes'
 
 
-def format_changelog_website(issues, out):
-    NEW_FEATURE = 'New Features and Improvements'
-    BUGFIX = 'Bug Fixes'
+class Changelog(object):
 
     CATEGORIES = {
         'New Feature': NEW_FEATURE,
@@ -87,23 +73,55 @@ def format_changelog_website(issues, out):
         'Bug': BUGFIX
     }
 
-    issues_by_category = defaultdict(list)
-    for issue in issues:
-        issue_type = issue.fields.issuetype.name
-        website_category = CATEGORIES[issue_type]
-        issues_by_category[website_category].append(issue)
+    def __init__(self, issues, use_simplified_groups=False):
+        self.issues = issues
+        self.issues_by_category = {}
+        self.components = {}
 
-    WEBSITE_ORDER = [NEW_FEATURE, BUGFIX]
+        for issue in issues:
+            issue_type = issue.fields.issuetype.name
 
-    for issue_category in WEBSITE_ORDER:
-        issue_group = issues_by_category[issue_category]
-        issue_group.sort(key=lambda x: x.key)
+            if use_simplified_groups:
+                issue_type = self.CATEGORIES[issue_type]
 
-        out.write('## {0}\n\n'.format(issue_category))
-        for issue in issue_group:
-            name = LINK_TEMPLATE.format(issue.key)
-            out.write('* {0} - {1}\n'.format(name, issue.fields.summary))
-        out.write('\n')
+            import pdb
+            pdb.set_trace()
+
+            issues_by_component = defaultdict(list)
+            components = [x.name for x in issue.fields.component]
+
+            if len(components) == 0:
+                issues_by_component['No Component'].append(issue)
+            else:
+                for component in components:
+                    issues_by_component[component].append(issue)
+                    self.components.add(component)
+
+            self.issues_by_category[issue_type] = issues_by_component
+
+    def format_markdown(self, out):
+
+        for issue_type, issue_group in sorted(self.issues_by_type.items()):
+            issue_group.sort(key=lambda x: x.key)
+
+            out.write('## {0}\n\n'.format(issue_type))
+            for issue in issue_group:
+                out.write('* {0} - {1}\n'.format(issue.key,
+                                                 issue.fields.summary))
+            out.write('\n')
+
+    def format_website(self, out):
+        WEBSITE_ORDER = [NEW_FEATURE, BUGFIX]
+
+        for issue_category in WEBSITE_ORDER:
+            issue_group = self.issues_by_category[issue_category]
+            issue_group.sort(key=lambda x: x.key)
+
+            out.write('## {0}\n\n'.format(issue_category))
+            for issue in issue_group:
+                name = LINK_TEMPLATE.format(issue.key)
+                out.write('* {0} - {1}\n'.format(name, issue.fields.summary))
+            out.write('\n')
 
 
 def get_changelog(version, for_website=False):
@@ -112,9 +130,11 @@ def get_changelog(version, for_website=False):
     buf = StringIO()
 
     if for_website:
-        format_changelog_website(issues_for_version, buf)
+        log = Changelog(issues_for_version, use_simplified_groups=True)
+        log.format_website(buf)
     else:
-        format_changelog_markdown(issues_for_version, buf)
+        log = Changelog(issues_for_version)
+        log.format_markdown(buf)
 
     return buf.getvalue()
 

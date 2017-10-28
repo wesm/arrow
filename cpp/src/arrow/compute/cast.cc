@@ -727,17 +727,23 @@ static Status AllocateIfNotPreallocated(FunctionContext* ctx, const Array& input
 class CastKernel : public UnaryKernel {
  public:
   CastKernel(const CastOptions& options, const CastFunction& func, bool is_zero_copy,
-             bool can_pre_allocate_values)
+             bool can_pre_allocate_values, const std::shared_ptr<DataType>& out_type)
       : options_(options),
         func_(func),
         is_zero_copy_(is_zero_copy),
-        can_pre_allocate_values_(can_pre_allocate_values) {}
+        can_pre_allocate_values_(can_pre_allocate_values),
+        out_type_(out_type) {}
 
-  Status Call(FunctionContext* ctx, const Array& input, ArrayData* out) override {
-    if (!is_zero_copy_) {
-      RETURN_NOT_OK(AllocateIfNotPreallocated(ctx, input, can_pre_allocate_values_, out));
+  Status Call(FunctionContext* ctx, const Array& input,
+              std::shared_ptr<ArrayData>* out) override {
+    if (!*out) {
+      *out = std::make_shared<ArrayData>(out_type_, input.length());
     }
-    func_(ctx, options_, input, out);
+    if (!is_zero_copy_) {
+      RETURN_NOT_OK(
+          AllocateIfNotPreallocated(ctx, input, can_pre_allocate_values_, out->get()));
+    }
+    func_(ctx, options_, input, out->get());
     RETURN_IF_ERROR(ctx);
     return Status::OK();
   }
@@ -747,6 +753,7 @@ class CastKernel : public UnaryKernel {
   CastFunction func_;
   bool is_zero_copy_;
   bool can_pre_allocate_values_;
+  std::shared_ptr<DataType> out_type_;
 };
 
 #define CAST_CASE(InType, OutType)                                                  \
@@ -836,22 +843,22 @@ class CastKernel : public UnaryKernel {
   FN(IN_TYPE, BinaryType);            \
   FN(IN_TYPE, StringType);
 
-#define GET_CAST_FUNCTION(CASE_GENERATOR, InType)                                \
-  static std::unique_ptr<UnaryKernel> Get##InType##CastFunc(                     \
-      const std::shared_ptr<DataType>& out_type, const CastOptions& options) {   \
-    CastFunction func;                                                           \
-    bool is_zero_copy = false;                                                   \
-    bool can_pre_allocate_values = true;                                         \
-    switch (out_type->id()) {                                                    \
-      CASE_GENERATOR(CAST_CASE, InType);                                         \
-      default:                                                                   \
-        break;                                                                   \
-    }                                                                            \
-    if (func != nullptr) {                                                       \
-      return std::unique_ptr<UnaryKernel>(                                       \
-          new CastKernel(options, func, is_zero_copy, can_pre_allocate_values)); \
-    }                                                                            \
-    return nullptr;                                                              \
+#define GET_CAST_FUNCTION(CASE_GENERATOR, InType)                              \
+  static std::unique_ptr<UnaryKernel> Get##InType##CastFunc(                   \
+      const std::shared_ptr<DataType>& out_type, const CastOptions& options) { \
+    CastFunction func;                                                         \
+    bool is_zero_copy = false;                                                 \
+    bool can_pre_allocate_values = true;                                       \
+    switch (out_type->id()) {                                                  \
+      CASE_GENERATOR(CAST_CASE, InType);                                       \
+      default:                                                                 \
+        break;                                                                 \
+    }                                                                          \
+    if (func != nullptr) {                                                     \
+      return std::unique_ptr<UnaryKernel>(new CastKernel(                      \
+          options, func, is_zero_copy, can_pre_allocate_values, out_type));    \
+    }                                                                          \
+    return nullptr;                                                            \
   }
 
 GET_CAST_FUNCTION(NULL_CASES, NullType);
@@ -919,11 +926,29 @@ Status Cast(FunctionContext* ctx, const Array& array,
   std::unique_ptr<UnaryKernel> func;
   RETURN_NOT_OK(GetCastFunction(*array.type(), out_type, options, &func));
 
-  // Data structure for output
-  auto out_data = std::make_shared<ArrayData>(out_type, array.length());
-
-  RETURN_NOT_OK(func->Call(ctx, array, out_data.get()));
+  std::shared_ptr<ArrayData> out_data;
+  RETURN_NOT_OK(func->Call(ctx, array, &out_data));
   *out = MakeArray(out_data);
+  return Status::OK();
+}
+
+Status Cast(FunctionContext* context, const ChunkedArray& array,
+            const std::shared_ptr<DataType>& to_type, const CastOptions& options,
+            std::shared_ptr<ChunkedArray>* out) {
+  std::vector<std::shared_ptr<Array>> out_arrays(array.num_chunks());
+  return Status::OK();
+}
+
+Status Cast(FunctionContext* context, const Column& column,
+            const std::shared_ptr<DataType>& to_type, const CastOptions& options,
+            std::shared_ptr<Column>* out) {
+  std::shared_ptr<ChunkedArray> chunked_array;
+  RETURN_NOT_OK(Cast(context, *column.data(), to_type, options, &chunked_array));
+
+  auto field = std::make_shared<Field>(column.field()->name(), to_type,
+                                       column.field()->nullable());
+  *out = std::make_shared<Column>(field, chunked_array);
+
   return Status::OK();
 }
 

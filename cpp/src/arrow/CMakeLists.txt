@@ -52,6 +52,7 @@ if (ARROW_COMPUTE)
   set(ARROW_SRCS ${ARROW_SRCS}
     compute/cast.cc
     compute/context.cc
+    compute/hash_kernels.cc
   )
 endif()
 

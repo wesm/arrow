@@ -36,7 +36,8 @@ class ARROW_EXPORT OpKernel {
 /// \brief An array-valued function of a single input argument
 class ARROW_EXPORT UnaryKernel : public OpKernel {
  public:
-  virtual Status Call(FunctionContext* ctx, const Array& input, ArrayData* out) = 0;
+  virtual Status Call(FunctionContext* ctx, const Array& input,
+                      std::shared_ptr<ArrayData>* out) = 0;
 };
 
 }  // namespace compute

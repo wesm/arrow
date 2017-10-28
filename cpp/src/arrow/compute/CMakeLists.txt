@@ -20,6 +20,7 @@ install(FILES
   api.h
   cast.h
   context.h
+  hash_kernels.h
   kernel.h
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/arrow/compute")
 

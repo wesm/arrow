@@ -39,6 +39,7 @@
 
 #include "arrow/compute/cast.h"
 #include "arrow/compute/context.h"
+#include "arrow/compute/hash_kernels.h"
 #include "arrow/compute/kernel.h"
 
 using std::vector;
@@ -632,7 +633,7 @@ TEST_F(TestCast, PreallocatedMemory) {
   out_data->buffers.push_back(nullptr);
   out_data->buffers.push_back(out_values);
 
-  ASSERT_OK(kernel->Call(&this->ctx_, *arr, out_data.get()));
+  ASSERT_OK(kernel->Call(&this->ctx_, *arr, &out_data));
 
   // Buffer address unchanged
   ASSERT_EQ(out_values.get(), out_data->buffers[1].get());
@@ -663,6 +664,107 @@ TYPED_TEST(TestDictionaryCast, Basic) {
   ASSERT_OK(EncodeArrayToDictionary(*plain_array, this->pool_, &dict_array));
 
   this->CheckPass(*dict_array, *plain_array, plain_array->type(), options);
+}
+
+/*TYPED_TEST(TestDictionaryCast, Reverse) {
+  CastOptions options;
+  std::shared_ptr<Array> plain_array =
+      TestBase::MakeRandomArray<typename TypeTraits<TypeParam>::ArrayType>(10, 2);
+
+  std::shared_ptr<Array> dict_array;
+  ASSERT_OK(EncodeArrayToDictionary(*plain_array, this->pool_, &dict_array));
+
+  this->CheckPass(*plain_array, *dict_array, dict_array->type(), options);
+}*/
+
+// ----------------------------------------------------------------------
+// Unique tests
+
+template <typename TypeParam>
+class TestUniqueKernel : public ComputeFixture, public TestBase {
+ public:
+  void SetUp();
+
+ protected:
+  std::shared_ptr<Array> input_array;
+  std::shared_ptr<Array> expected_array;
+};
+
+template <typename TypeParam>
+void TestUniqueKernel<TypeParam>::SetUp() {
+  NumericBuilder<TypeParam> builder(default_memory_pool());
+  ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(1)));
+  ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(2)));
+  ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(1)));
+  ASSERT_OK(builder.Finish(&input_array));
+
+  NumericBuilder<TypeParam> expected_builder;
+  ASSERT_OK(expected_builder.Append(static_cast<typename TypeParam::c_type>(1)));
+  ASSERT_OK(expected_builder.Append(static_cast<typename TypeParam::c_type>(2)));
+  ASSERT_OK(expected_builder.Finish(&expected_array));
+}
+
+template <>
+void TestUniqueKernel<StringType>::SetUp() {
+  StringUniqueBuilder builder(default_memory_pool());
+  ASSERT_OK(builder.Append("test"));
+  ASSERT_OK(builder.Append("test2"));
+  ASSERT_OK(builder.Append("test"));
+  ASSERT_OK(builder.Finish(&input_array));
+
+  StringBuilder str_builder;
+  ASSERT_OK(str_builder.Append("test"));
+  ASSERT_OK(str_builder.Append("test2"));
+  ASSERT_OK(str_builder.Finish(&expected_array));
+}
+
+template <>
+void TestUniqueKernel<FixedSizeBinaryType>::SetUp() {
+  FixedSizeBinaryBuilder builder(arrow::fixed_size_binary(4));
+  std::vector<uint8_t> test{12, 12, 11, 12};
+  std::vector<uint8_t> test2{12, 12, 11, 11};
+  ASSERT_OK(builder.Append(test.data()));
+  ASSERT_OK(builder.Append(test2.data()));
+  ASSERT_OK(builder.Append(test.data()));
+  ASSERT_OK(builder.Finish(&input_array));
+
+  FixedSizeBinaryBuilder fsb_builder(arrow::fixed_size_binary(4));
+  ASSERT_OK(fsb_builder.Append(test.data()));
+  ASSERT_OK(fsb_builder.Append(test2.data()));
+  ASSERT_OK(fsb_builder.Finish(&expected_array));
+}
+
+typedef ::testing::Types<Int8Type, UInt8Type, Int16Type, UInt16Type, Int32Type,
+                         UInt32Type, Int64Type, UInt64Type, FloatType, DoubleType,
+                         StringType, FixedSizeBinaryType>
+    UniqueTestTypes;
+
+TYPED_TEST_CASE(TestUniqueKernel, UniqueTestTypes);
+
+TYPED_TEST(TestUniqueKernel, Array) {
+  std::shared_ptr<Array> result;
+  ASSERT_OK(Unique(&this->ctx_, *this->input_array, &result));
+  ASSERT_TRUE(this->expected_array->Equals(result));
+}
+
+TYPED_TEST(TestUniqueKernel, ChunkedArray) {
+  // Case 1: Simple array wrapped in a ChunkedArray
+  ChunkedArray carray_case1({this->input_array});
+  std::shared_ptr<Array> result;
+  ASSERT_OK(Unique(&this->ctx_, carray_case1, &result));
+  ASSERT_TRUE(this->expected_array->Equals(result));
+
+  // Case 2: Multiple arrays in a ChunkedArray
+  ChunkedArray carray_case2({this->input_array, this->input_array});
+  ASSERT_OK(Unique(&this->ctx_, carray_case2, &result));
+  ASSERT_TRUE(this->expected_array->Equals(result));
+}
+
+TYPED_TEST(TestUniqueKernel, Column) {
+  Column column(field("column", this->input_array->type()), this->input_array);
+  std::shared_ptr<Array> result;
+  ASSERT_OK(Unique(&this->ctx_, column, &result));
+  ASSERT_TRUE(this->expected_array->Equals(result));
 }
 
 }  // namespace compute

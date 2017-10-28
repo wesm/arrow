@@ -1635,6 +1635,25 @@ typedef ::testing::Types<Int8Type, UInt8Type, Int16Type, UInt16Type, Int32Type,
 
 TYPED_TEST_CASE(TestDictionaryBuilder, PrimitiveDictionaries);
 
+TYPED_TEST(TestDictionaryBuilder, UniqueBasic) {
+  UniqueBuilder<TypeParam> builder(default_memory_pool());
+  ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(1)));
+  ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(2)));
+  ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(1)));
+
+  std::shared_ptr<Array> result;
+  ASSERT_OK(builder.Finish(&result));
+
+  // Build expected data
+  NumericBuilder<TypeParam> expected_builder;
+  ASSERT_OK(expected_builder.Append(static_cast<typename TypeParam::c_type>(1)));
+  ASSERT_OK(expected_builder.Append(static_cast<typename TypeParam::c_type>(2)));
+  std::shared_ptr<Array> expected;
+  ASSERT_OK(expected_builder.Finish(&expected));
+
+  ASSERT_TRUE(expected->Equals(result));
+}
+
 TYPED_TEST(TestDictionaryBuilder, Basic) {
   DictionaryBuilder<TypeParam> builder(default_memory_pool());
   ASSERT_OK(builder.Append(static_cast<typename TypeParam::c_type>(1)));
@@ -1734,6 +1753,26 @@ TYPED_TEST(TestDictionaryBuilder, DoubleTableSize) {
   }
 }
 
+TEST(TestStringDictionaryBuilder, UniqueBasic) {
+  // Build the dictionary Array
+  StringUniqueBuilder builder(default_memory_pool());
+  ASSERT_OK(builder.Append("test"));
+  ASSERT_OK(builder.Append("test2"));
+  ASSERT_OK(builder.Append("test"));
+
+  std::shared_ptr<Array> result;
+  ASSERT_OK(builder.Finish(&result));
+
+  // Build expected data
+  StringBuilder str_builder;
+  ASSERT_OK(str_builder.Append("test"));
+  ASSERT_OK(str_builder.Append("test2"));
+  std::shared_ptr<Array> expected;
+  ASSERT_OK(str_builder.Finish(&expected));
+
+  ASSERT_TRUE(expected->Equals(result));
+}
+
 TEST(TestStringDictionaryBuilder, Basic) {
   // Build the dictionary Array
   StringDictionaryBuilder builder(default_memory_pool());
@@ -1797,6 +1836,29 @@ TEST(TestStringDictionaryBuilder, DoubleTableSize) {
 
   DictionaryArray expected(dtype, int_array);
   ASSERT_TRUE(expected.Equals(result));
+}
+
+TEST(TestFixedSizeBinaryDictionaryBuilder, UniqueBasic) {
+  // Build the dictionary Array
+  UniqueBuilder<FixedSizeBinaryType> builder(arrow::fixed_size_binary(4),
+                                             default_memory_pool());
+  std::vector<uint8_t> test{12, 12, 11, 12};
+  std::vector<uint8_t> test2{12, 12, 11, 11};
+  ASSERT_OK(builder.Append(test.data()));
+  ASSERT_OK(builder.Append(test2.data()));
+  ASSERT_OK(builder.Append(test.data()));
+
+  std::shared_ptr<Array> result;
+  ASSERT_OK(builder.Finish(&result));
+
+  // Build expected data
+  FixedSizeBinaryBuilder fsb_builder(arrow::fixed_size_binary(4));
+  ASSERT_OK(fsb_builder.Append(test.data()));
+  ASSERT_OK(fsb_builder.Append(test2.data()));
+  std::shared_ptr<Array> expected;
+  ASSERT_OK(fsb_builder.Finish(&expected));
+
+  ASSERT_TRUE(expected->Equals(result));
 }
 
 TEST(TestFixedSizeBinaryDictionaryBuilder, Basic) {

@@ -15,10 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_COMPUTE_CAST_H
-#define ARROW_COMPUTE_CAST_H
-
-#include <memory>
+#ifndef ARROW_COMPUTE_HASH_KERNELS_H
+#define ARROW_COMPUTE_HASH_KERNELS_H
 
 #include "arrow/status.h"
 #include "arrow/util/visibility.h"
@@ -35,34 +33,43 @@ namespace compute {
 class FunctionContext;
 class UnaryKernel;
 
-struct CastOptions {
-  CastOptions() : allow_int_overflow(false), allow_time_truncate(false) {}
-
-  bool allow_int_overflow;
-  bool allow_time_truncate;
-};
-
-/// \since 0.7.0
+/// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status GetCastFunction(const DataType& in_type, const std::shared_ptr<DataType>& to_type,
-                       const CastOptions& options, std::unique_ptr<UnaryKernel>* kernel);
+Status GetUniqueFunction(const DataType& in_type, std::unique_ptr<UnaryKernel>* kernel);
 
-/// \brief Cast from one array type to another
+/// \brief Unique elements of an array
 /// \param[in] context the FunctionContext
-/// \param[in] array array to cast
-/// \param[in] to_type type to cast to
-/// \param[in] options casting options
+/// \param[in] array array with all possible values
 /// \param[out] out resulting array
 ///
-/// \since 0.7.0
+/// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status Cast(FunctionContext* context, const Array& array,
-            const std::shared_ptr<DataType>& to_type, const CastOptions& options,
-            std::shared_ptr<Array>* out);
+Status Unique(FunctionContext* context, const Array& array, std::shared_ptr<Array>* out);
 
-}  // namespace compute
-}  // namespace arrow
+/// \brief Unique elements of a chunked array
+/// \param[in] context the FunctionContext
+/// \param[in] array chunked array with all possible value
+/// \param[out] out resulting array
+///
+/// \since 0.8.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Status Unique(FunctionContext* context, const ChunkedArray& array,
+              std::shared_ptr<Array>* out);
 
-#endif  // ARROW_COMPUTE_CAST_H
+/// \brief Unique elements of a column
+/// \param[in] context the FunctionContext
+/// \param[in] column column with all possible values
+/// \param[out] out resulting array
+///
+/// \since 0.8.0
+/// \note API not yet finalized
+ARROW_EXPORT
+Status Unique(FunctionContext* context, const Column& array, std::shared_ptr<Array>* out);
+
+}  // compute
+}  // arrow
+
+#endif

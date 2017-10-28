@@ -854,6 +854,121 @@ struct DictionaryScalar<FixedSizeBinaryType> {
 
 }  // namespace internal
 
+/// \brief Array builder that only adds elements if they already exist
+template <typename T>
+class ARROW_EXPORT UniqueBuilder : public ArrayBuilder {
+ public:
+  using Scalar = typename internal::DictionaryScalar<T>::type;
+
+  UniqueBuilder(const std::shared_ptr<DataType>& type, MemoryPool* pool);
+  template <typename T1 = T>
+  explicit UniqueBuilder(
+      typename std::enable_if<TypeTraits<T1>::is_parameter_free, MemoryPool*>::type pool)
+      : UniqueBuilder<T1>(TypeTraits<T1>::type_singleton(), pool) {}
+
+  /// \brief Append a scalar value
+  Status Append(const Scalar& value);
+  /// \brief Append a scalar value and return the index in the array
+  Status Append(const Scalar& value, int32_t* index);
+  /// \brief Append a whole dense array to the builder
+  Status AppendArray(const Array& array);
+
+  Status Init(int64_t elements) override;
+  Status Resize(int64_t capacity) override;
+  Status FinishInternal(std::shared_ptr<ArrayData>* out) override;
+
+ protected:
+  Status DoubleTableSize();
+  Scalar GetDictionaryValue(int64_t index);
+  int HashValue(const Scalar& value);
+  bool SlotDifferent(hash_slot_t slot, const Scalar& value);
+  Status AppendDictionary(const Scalar& value);
+
+  std::shared_ptr<PoolBuffer> hash_table_;
+  int32_t* hash_slots_;
+
+  /// Size of the table. Must be a power of 2.
+  int hash_table_size_;
+
+  // Store hash_table_size_ - 1, so that j & mod_bitmask_ is equivalent to j %
+  // hash_table_size_, but uses far fewer CPU cycles
+  int mod_bitmask_;
+
+  typename TypeTraits<T>::BuilderType dict_builder_;
+  int32_t byte_width_;
+};
+
+class ARROW_EXPORT BinaryUniqueBuilder : public UniqueBuilder<BinaryType> {
+ public:
+  using UniqueBuilder::Append;
+  using UniqueBuilder::UniqueBuilder;
+
+  Status Append(const uint8_t* value, int32_t length) {
+    return Append(internal::WrappedBinary(value, length));
+  }
+
+  Status Append(const uint8_t* value, int32_t length, int32_t* index) {
+    return Append(internal::WrappedBinary(value, length), index);
+  }
+
+  Status Append(const char* value, int32_t length) {
+    return Append(
+        internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value), length));
+  }
+
+  Status Append(const char* value, int32_t length, int32_t* index) {
+    return Append(
+        internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value), length), index);
+  }
+
+  Status Append(const std::string& value) {
+    return Append(internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value.c_str()),
+                                          static_cast<int32_t>(value.size())));
+  }
+
+  Status Append(const std::string& value, int32_t* index) {
+    return Append(internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value.c_str()),
+                                          static_cast<int32_t>(value.size())),
+                  index);
+  }
+};
+
+/// \brief Unique array builder with convenience methods for strings
+class ARROW_EXPORT StringUniqueBuilder : public UniqueBuilder<StringType> {
+ public:
+  using UniqueBuilder::Append;
+  using UniqueBuilder::UniqueBuilder;
+
+  Status Append(const uint8_t* value, int32_t length) {
+    return Append(internal::WrappedBinary(value, length));
+  }
+
+  Status Append(const uint8_t* value, int32_t length, int32_t* index) {
+    return Append(internal::WrappedBinary(value, length), index);
+  }
+
+  Status Append(const char* value, int32_t length) {
+    return Append(
+        internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value), length));
+  }
+
+  Status Append(const char* value, int32_t length, int32_t* index) {
+    return Append(
+        internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value), length), index);
+  }
+
+  Status Append(const std::string& value) {
+    return Append(internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value.c_str()),
+                                          static_cast<int32_t>(value.size())));
+  }
+
+  Status Append(const std::string& value, int32_t* index) {
+    return Append(internal::WrappedBinary(reinterpret_cast<const uint8_t*>(value.c_str()),
+                                          static_cast<int32_t>(value.size())),
+                  index);
+  }
+};
+
 /// \brief Array builder for created encoded DictionaryArray from dense array
 /// data
 template <typename T>
@@ -884,25 +999,8 @@ class ARROW_EXPORT DictionaryBuilder : public ArrayBuilder {
   Status FinishInternal(std::shared_ptr<ArrayData>* out) override;
 
  protected:
-  Status DoubleTableSize();
-  Scalar GetDictionaryValue(int64_t index);
-  int HashValue(const Scalar& value);
-  bool SlotDifferent(hash_slot_t slot, const Scalar& value);
-  Status AppendDictionary(const Scalar& value);
-
-  std::shared_ptr<PoolBuffer> hash_table_;
-  int32_t* hash_slots_;
-
-  /// Size of the table. Must be a power of 2.
-  int hash_table_size_;
-
-  // Store hash_table_size_ - 1, so that j & mod_bitmask_ is equivalent to j %
-  // hash_table_size_, but uses far fewer CPU cycles
-  int mod_bitmask_;
-
-  typename TypeTraits<T>::BuilderType dict_builder_;
+  UniqueBuilder<T> unique_builder_;
   AdaptiveIntBuilder values_builder_;
-  int32_t byte_width_;
 };
 
 template <>

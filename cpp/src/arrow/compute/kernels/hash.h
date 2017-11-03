@@ -18,6 +18,8 @@
 #ifndef ARROW_COMPUTE_HASH_KERNELS_H
 #define ARROW_COMPUTE_HASH_KERNELS_H
 
+#include <memory>
+
 #include "arrow/status.h"
 #include "arrow/util/visibility.h"
 
@@ -31,12 +33,13 @@ class DataType;
 namespace compute {
 
 class FunctionContext;
-class UnaryKernel;
+class StatefulUnaryKernel;
 
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status GetUniqueFunction(const DataType& in_type, std::unique_ptr<UnaryKernel>* kernel);
+Status GetUniqueFunction(const DataType& in_type,
+                         std::unique_ptr<StatefulUnaryKernel>* kernel);
 
 /// \brief Unique elements of an array
 /// \param[in] context the FunctionContext
@@ -67,7 +70,8 @@ Status Unique(FunctionContext* context, const ChunkedArray& array,
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status Unique(FunctionContext* context, const Column& array, std::shared_ptr<Array>* out);
+Status Unique(FunctionContext* context, const Column& column,
+              std::shared_ptr<Array>* out);
 
 }  // compute
 }  // arrow

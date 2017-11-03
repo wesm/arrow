@@ -18,10 +18,10 @@
 # Headers: top level
 install(FILES
   api.h
-  cast.h
   context.h
-  hash_kernels.h
   kernel.h
+  kernels/cast.h
+  kernels/hash.h
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/arrow/compute")
 
 # pkg-config support

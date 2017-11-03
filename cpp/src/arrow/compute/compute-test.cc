@@ -37,10 +37,10 @@
 #include "arrow/type.h"
 #include "arrow/type_traits.h"
 
-#include "arrow/compute/cast.h"
 #include "arrow/compute/context.h"
-#include "arrow/compute/hash_kernels.h"
 #include "arrow/compute/kernel.h"
+#include "arrow/compute/kernels/cast.h"
+#include "arrow/compute/kernels/hash.h"
 
 using std::vector;
 

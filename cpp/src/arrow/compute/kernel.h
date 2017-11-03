@@ -18,9 +18,14 @@
 #ifndef ARROW_COMPUTE_KERNEL_H
 #define ARROW_COMPUTE_KERNEL_H
 
-#include "arrow/array.h"
+#include <memory>
+
+#include "arrow/util/visibility.h"
 
 namespace arrow {
+
+class Array;
+
 namespace compute {
 
 class FunctionContext;
@@ -32,12 +37,44 @@ class ARROW_EXPORT OpKernel {
   virtual ~OpKernel() = default;
 };
 
+struct ARROW_EXPORT ScalarPlaceholder {};
+
+struct ARROW_EXPORT Datum {
+  enum type {
+    SCALAR,
+    ARRAY,
+    CHUNKED_ARRAY,
+    RECORD_BATCH,
+    TABLE
+  };
+
+  type kind;
+
+  union {
+    std::shared_ptr<ScalarPlaceholder> scalar;
+    std::shared_ptr<ArrayData> array;
+    std::shared_ptr<ChunkedArray> chunked_array;
+    std::shared_ptr<RecordBatch> record_batch;
+    std::shared_ptr<Table> table;
+  }
+
+  explicit Value(const std::shared_ptr<ArrayData>& array)
+    : kind(Value::ARRAY), array(array) {}
+
+  std::shared_ptr<DataType> type() const {
+    if (this->kind == Value::ARRAY) {
+      return this->array->type();
+    }
+    return nullptr;
+  }
+};
+
 /// \class UnaryKernel
 /// \brief An array-valued function of a single input argument
 class ARROW_EXPORT UnaryKernel : public OpKernel {
  public:
   virtual Status Call(FunctionContext* ctx, const Array& input,
-                      std::shared_ptr<ArrayData>* out) = 0;
+                      std::vector<Value>* out) = 0;
 };
 
 }  // namespace compute

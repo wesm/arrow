@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "arrow/compute/cast.h"
+#include "arrow/compute/kernels/cast.h"
 
 #include <cstdint>
 #include <cstring>
@@ -735,15 +735,19 @@ class CastKernel : public UnaryKernel {
         out_type_(out_type) {}
 
   Status Call(FunctionContext* ctx, const Array& input,
-              std::shared_ptr<ArrayData>* out) override {
-    if (!*out) {
-      *out = std::make_shared<ArrayData>(out_type_, input.length());
+              std::vector<Value>* out) override {
+    ArrayData* result;
+    if (!(*out[0])) {
+      out->emplace_back(Value(std::make_shared<ArrayData>(out_type_, input.length())));
     }
+
+    result = (*out)[0].array.get();
+
     if (!is_zero_copy_) {
       RETURN_NOT_OK(
-          AllocateIfNotPreallocated(ctx, input, can_pre_allocate_values_, out->get()));
+          AllocateIfNotPreallocated(ctx, input, can_pre_allocate_values_, result));
     }
-    func_(ctx, options_, input, out->get());
+    func_(ctx, options_, input, result);
     RETURN_IF_ERROR(ctx);
     return Status::OK();
   }
@@ -926,9 +930,9 @@ Status Cast(FunctionContext* ctx, const Array& array,
   std::unique_ptr<UnaryKernel> func;
   RETURN_NOT_OK(GetCastFunction(*array.type(), out_type, options, &func));
 
-  std::shared_ptr<ArrayData> out_data;
-  RETURN_NOT_OK(func->Call(ctx, array, &out_data));
-  *out = MakeArray(out_data);
+  std::vector<Value> out;
+  RETURN_NOT_OK(func->Call(ctx, array, &out));
+  *out = MakeArray(out[0].array);
   return Status::OK();
 }
 

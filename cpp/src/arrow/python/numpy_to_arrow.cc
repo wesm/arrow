@@ -42,7 +42,7 @@
 #include "arrow/util/macros.h"
 #include "arrow/visitor_inline.h"
 
-#include "arrow/compute/cast.h"
+#include "arrow/compute/kernels/cast.h"
 #include "arrow/compute/context.h"
 
 #include "arrow/python/builtin_convert.h"

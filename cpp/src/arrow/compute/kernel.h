@@ -25,6 +25,10 @@
 namespace arrow {
 
 class Array;
+class ArrayData;
+class ChunkedArray;
+class RecordBatch;
+class Table;
 
 namespace compute {
 
@@ -37,7 +41,7 @@ class ARROW_EXPORT OpKernel {
   virtual ~OpKernel() = default;
 };
 
-struct ARROW_EXPORT ScalarPlaceholder {};
+struct ARROW_EXPORT Scalar {};
 
 struct ARROW_EXPORT Datum {
   enum type {
@@ -51,19 +55,37 @@ struct ARROW_EXPORT Datum {
   type kind;
 
   union {
-    std::shared_ptr<ScalarPlaceholder> scalar;
+    std::shared_ptr<Scalar> scalar;
     std::shared_ptr<ArrayData> array;
     std::shared_ptr<ChunkedArray> chunked_array;
     std::shared_ptr<RecordBatch> record_batch;
     std::shared_ptr<Table> table;
   }
 
-  explicit Value(const std::shared_ptr<ArrayData>& array)
-    : kind(Value::ARRAY), array(array) {}
+  explicit Datum(const std::shared_ptr<Scalar>& value)
+    : kind(Datum::SCALAR), scalar(value) {}
+
+  explicit Datum(const std::shared_ptr<ArrayData>& value)
+    : kind(Datum::ARRAY), array(value) {}
+
+  explicit Datum(const std::shared_ptr<ChunkedArray>& value)
+    : kind(Datum::CHUNKED_ARRAY), chunked_array(value) {}
+
+  explicit Datum(const std::shared_ptr<RecordBatch>& value)
+    : kind(Datum::RECORD_BATCH), record_batch(value) {}
+
+  explicit Datum(const std::shared_ptr<Table>& value)
+    : kind(Datum::TABLE), table(value) {}
+
+  bool is_arraylike() const {
+    return this->kind == Datum::ARRAY || this->kind == Datum::CHUNKED_ARRAY;
+  }
 
   std::shared_ptr<DataType> type() const {
-    if (this->kind == Value::ARRAY) {
+    if (this->kind == Datum::ARRAY) {
       return this->array->type();
+    } else if (this->kind == Datum::CHUNKED_ARRAY) {
+      return this->chunked_array->type();
     }
     return nullptr;
   }
@@ -74,7 +96,7 @@ struct ARROW_EXPORT Datum {
 class ARROW_EXPORT UnaryKernel : public OpKernel {
  public:
   virtual Status Call(FunctionContext* ctx, const Array& input,
-                      std::vector<Value>* out) = 0;
+                      std::vector<Datum>* out) = 0;
 };
 
 }  // namespace compute

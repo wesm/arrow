@@ -20,12 +20,14 @@
 
 #include <memory>
 
+#include "arrow/compute/kernel.h"
 #include "arrow/status.h"
 #include "arrow/util/visibility.h"
 
 namespace arrow {
 
 class Array;
+class ArrayData;
 class ChunkedArray;
 class Column;
 class DataType;
@@ -33,45 +35,69 @@ class DataType;
 namespace compute {
 
 class FunctionContext;
-class StatefulUnaryKernel;
+
+class ARROW_EXPORT HashKernel : public OpKernel {
+ public:
+  /// \brief Invoke hash table kernel on input array, returning any output
+  /// values. Implementations should be thread-safe
+  ///
+  /// \param[in] ctx a function context
+  /// \param[in] input the input array to process
+  /// \param[out] out any output arrays (may not return any)
+  /// \return Status
+  virtual Status Call(FunctionContext* ctx, const Array& input,
+                      std::vector<Datum>* out) = 0;
+
+  virtual Status GetDictionary(std::shared_ptr<ArrayData>* out) = 0;
+};
 
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
 Status GetUniqueFunction(const DataType& in_type,
-                         std::unique_ptr<StatefulUnaryKernel>* kernel);
+                         std::unique_ptr<HashKernel>* kernel);
 
-/// \brief Unique elements of an array
+ARROW_EXPORT
+Status GetDictionaryEncodeFunction(const DataType& in_type,
+                                   std::unique_ptr<HashKernel>* kernel);
+
+/// \brief Compute unique elements from an array-like object
 /// \param[in] context the FunctionContext
-/// \param[in] array array with all possible values
-/// \param[out] out resulting array
+/// \param[in] datum array-like input
+/// \param[out] out result as Array
 ///
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status Unique(FunctionContext* context, const Array& array, std::shared_ptr<Array>* out);
-
-/// \brief Unique elements of a chunked array
-/// \param[in] context the FunctionContext
-/// \param[in] array chunked array with all possible value
-/// \param[out] out resulting array
-///
-/// \since 0.8.0
-/// \note API not yet finalized
-ARROW_EXPORT
-Status Unique(FunctionContext* context, const ChunkedArray& array,
+Status Unique(FunctionContext* context, const Datum& datum,
               std::shared_ptr<Array>* out);
 
-/// \brief Unique elements of a column
+
+/// \brief Dictionary-encode values in an array-like object
 /// \param[in] context the FunctionContext
-/// \param[in] column column with all possible values
-/// \param[out] out resulting array
+/// \param[in] datum array-like input
+/// \param[out] out result with same shape and type as input
 ///
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status Unique(FunctionContext* context, const Column& column,
-              std::shared_ptr<Array>* out);
+Status DictionaryEncode(FunctionContext* context, const Datum& datum,
+                        Datum* out);
+
+ARROW_EXPORT
+Status Match(FunctionContext* context, const Datum& values,
+             const Array& member_set,
+             std::shared_ptr<Array>* out);
+
+ARROW_EXPORT
+Status IsIn(FunctionContext* context, const Datum& values,
+            const Array& member_set,
+            std::shared_ptr<Array>* out);
+
+ARROW_EXPORT
+Status CountValues(FunctionContext* context, const Datum& values,
+                   std::shared_ptr<Array>* out_uniques,
+                   std::shared_ptr<Array>* out_counts);
 
 }  // compute
 }  // arrow

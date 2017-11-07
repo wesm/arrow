@@ -29,6 +29,7 @@ class Array;
 class ChunkedArray;
 class Column;
 class DataType;
+class Datum;
 
 namespace compute {
 
@@ -61,6 +62,11 @@ ARROW_EXPORT
 Status Cast(FunctionContext* context, const Array& array,
             const std::shared_ptr<DataType>& to_type, const CastOptions& options,
             std::shared_ptr<Array>* out);
+
+ARROW_EXPORT
+Status Cast(FunctionContext* context, const Datum& value,
+            const std::shared_ptr<DataType>& to_type, const CastOptions& options,
+            Datum* out);
 
 }  // namespace compute
 }  // namespace arrow

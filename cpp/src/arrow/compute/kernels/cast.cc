@@ -39,6 +39,7 @@
 
 #include "arrow/compute/context.h"
 #include "arrow/compute/kernel.h"
+#include "arrow/compute/kernels/util-internal.h"
 
 #ifdef ARROW_EXTRA_ERROR_CONTEXT
 
@@ -160,8 +161,7 @@ struct CastFunctor<NullType, DictionaryType> {
 
 // Cast from Boolean to other numbers
 template <typename T>
-struct CastFunctor<T, BooleanType,
-                   typename std::enable_if<std::is_base_of<Number, T>::value>::type> {
+struct CastFunctor<T, BooleanType, enable_if_number<T>> {
   void operator()(FunctionContext* ctx, const CastOptions& options, const Array& input,
                   ArrayData* output) {
     using c_type = typename T::c_type;
@@ -735,10 +735,10 @@ class CastKernel : public UnaryKernel {
         out_type_(out_type) {}
 
   Status Call(FunctionContext* ctx, const Array& input,
-              std::vector<Value>* out) override {
+              std::vector<Datum>* out) override {
     ArrayData* result;
-    if (!(*out[0])) {
-      out->emplace_back(Value(std::make_shared<ArrayData>(out_type_, input.length())));
+    if (out->size() == 0) {
+      out->emplace_back(std::make_shared<ArrayData>(out_type_, input.length()));
     }
 
     result = (*out)[0].array.get();
@@ -930,9 +930,9 @@ Status Cast(FunctionContext* ctx, const Array& array,
   std::unique_ptr<UnaryKernel> func;
   RETURN_NOT_OK(GetCastFunction(*array.type(), out_type, options, &func));
 
-  std::vector<Value> out;
-  RETURN_NOT_OK(func->Call(ctx, array, &out));
-  *out = MakeArray(out[0].array);
+  std::vector<Datum> result;
+  RETURN_NOT_OK(func->Call(ctx, array, &result));
+  *out = MakeArray(result[0].array);
   return Status::OK();
 }
 

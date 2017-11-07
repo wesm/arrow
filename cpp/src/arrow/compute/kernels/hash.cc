@@ -26,6 +26,7 @@
 #include "arrow/builder.h"
 #include "arrow/compute/context.h"
 #include "arrow/compute/kernel.h"
+#include "arrow/compute/kernels/util-internal.h"
 
 namespace arrow {
 namespace compute {
@@ -63,7 +64,7 @@ Status NewHashTable(int64_t size, MemoryPool* pool, std::shared_ptr<Buffer>* out
 // will raise an internal exception so that only the actions where errors can
 // occur will experience the extra overhead
 class HashException : public std::exception {
-  HashException(const char* msg, StatusCode code = StatusCude::Invalid)
+  HashException(const char* msg, StatusCode code = StatusCode::Invalid)
       : msg_(msg), code_(code) {}
 
   HashException(const std::string& msg, StatusCode code = StatusCode::Invalid)
@@ -74,15 +75,18 @@ class HashException : public std::exception {
 
   ~HashException() throw() {}
 
-  const char* HashException::what() const override throw() {
-    return msg_.c_str();
-  }
+  const char* what() const throw() override;
 
   StatusCode code() { return code_; }
 
  private:
+  std::string msg_;
   StatusCode code_;
 };
+
+const char* HashException::what() const throw() {
+  return msg_.c_str();
+}
 
 #define HASH_THROW_NOT_OK(EXPR)                     \
   do {                                              \
@@ -117,7 +121,7 @@ class HashTable {
 
   // The hash table contains integer indices that reference the set of observed
   // distinct values
-  std::shared_ptr<PoolBuffer> hash_table_;
+  std::shared_ptr<Buffer> hash_table_;
   hash_slot_t* hash_slots_;
 
   /// Size of the table. Must be a power of 2.
@@ -140,20 +144,15 @@ Status HashTable::Init(int64_t elements) {
 template <typename Type, typename Action, typename Enable = void>
 class HashTableKernel : public HashTable {};
 
-template <typename T>
-using is_primitive_ctype = typename std::enable_if<
-  std::is_base_of<PrimitiveCType, T>::value>::type;
+// template <>
+// int UniqueBuilder<FixedSizeBinaryType>::HashValue(const Scalar& value) {
+//   return HashUtil::Hash(value, byte_width_, 0);
+// }
 
-template <>
-int UniqueBuilder<FixedSizeBinaryType>::HashValue(const Scalar& value) {
-  return HashUtil::Hash(value, byte_width_, 0);
-}
-
-
+// Linear probing
 #define HASH_PROBE(TABLE, TABLE_SIZE, DIFFERENT)                \
   do {                                                          \
     while (kHashSlotEmpty != slot && DIFFERENT(slot, value)) {  \
-      // Linear probing                                         \
       ++j;                                                      \
       if (j == TABLE_SIZE) {                                    \
         j = 0;                                                  \
@@ -175,7 +174,7 @@ template <typename Type, typename Enable = void>
 class HashDictionary {};
 
 template <typename Type>
-struct HashDictionary<Type, is_primitive_ctype<Type>> {
+struct HashDictionary<Type, enable_if_primitive_ctype<Type>> {
   using T = typename Type::c_type;
 
   HashDictionary() : size(0), capacity(0) {}
@@ -193,7 +192,7 @@ struct HashDictionary<Type, is_primitive_ctype<Type>> {
   Status Resize(const int64_t elements) {
     RETURN_NOT_OK(this->buffer->Resize(elements * sizeof(T)));
 
-    this->capacity = elements
+    this->capacity = elements;
     this->values = this->buffer->mutable_data();
     return Status::OK();
   }
@@ -206,16 +205,17 @@ struct HashDictionary<Type, is_primitive_ctype<Type>> {
 
 
 template <typename Type, typename Action>
-class HashTableKernel<Type, Action, is_primitive_ctype<Type>> : public HashTableBase {
+class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
+    : public HashTable {
  public:
   using T = typename Type::c_type;
   using ArrayType = typename TypeTraits<Type>::ArrayType;
 
-  using HashTableBase::HashTableBase;
+  using HashTable::HashTable;
 
   Status Init() {
     RETURN_NOT_OK(dict_.Init(pool_));
-    return HashTableBase::Init();
+    return HashTable::Init();
   }
 
   Status Append(const Array& arr) {
@@ -317,14 +317,6 @@ class HashTableKernel<Type, Action, is_primitive_ctype<Type>> : public HashTable
 
   HashDictionary<Type> dict_;
 };
-
-// int32_t byte_width_;
-
-// try {
-
-// } catch (const HashException& e) {
-//   return Status::Invalid(e.what());
-// }
 
 template <typename Type>
 class UniqueImpl : public HashTableKernel<Type, UniqueImpl>  {

@@ -20,16 +20,12 @@
 
 #include <memory>
 
+#include "arrow/array.h"
+#include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
+#include "arrow/table.h"
 
 namespace arrow {
-
-class Array;
-class ArrayData;
-class ChunkedArray;
-class RecordBatch;
-class Table;
-
 namespace compute {
 
 class FunctionContext;
@@ -41,7 +37,11 @@ class ARROW_EXPORT OpKernel {
   virtual ~OpKernel() = default;
 };
 
-struct ARROW_EXPORT Scalar {};
+struct ARROW_EXPORT Scalar {
+  ~Scalar() {}
+
+  ARROW_DISALLOW_COPY_AND_ASSIGN(Scalar);
+};
 
 struct ARROW_EXPORT Datum {
   enum type {
@@ -60,7 +60,7 @@ struct ARROW_EXPORT Datum {
     std::shared_ptr<ChunkedArray> chunked_array;
     std::shared_ptr<RecordBatch> record_batch;
     std::shared_ptr<Table> table;
-  }
+  };
 
   explicit Datum(const std::shared_ptr<Scalar>& value)
     : kind(Datum::SCALAR), scalar(value) {}
@@ -77,13 +77,38 @@ struct ARROW_EXPORT Datum {
   explicit Datum(const std::shared_ptr<Table>& value)
     : kind(Datum::TABLE), table(value) {}
 
+  ~Datum() {}
+
+  Datum(const Datum& other) noexcept
+    : kind(other.kind) {
+    switch (other.kind) {
+      case Datum::SCALAR:
+        this->scalar = other.scalar;
+        break;
+      case Datum::ARRAY:
+        this->array = other.array;
+        break;
+      case Datum::CHUNKED_ARRAY:
+        this->chunked_array = other.chunked_array;
+        break;
+      case Datum::RECORD_BATCH:
+        this->record_batch = other.record_batch;
+        break;
+      case Datum::TABLE:
+        this->table = other.table;
+        break;
+      default:
+        break;
+    }
+  }
+
   bool is_arraylike() const {
     return this->kind == Datum::ARRAY || this->kind == Datum::CHUNKED_ARRAY;
   }
 
   std::shared_ptr<DataType> type() const {
     if (this->kind == Datum::ARRAY) {
-      return this->array->type();
+      return this->array->type;
     } else if (this->kind == Datum::CHUNKED_ARRAY) {
       return this->chunked_array->type();
     }

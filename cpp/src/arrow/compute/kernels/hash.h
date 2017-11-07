@@ -15,39 +15,25 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_COMPUTE_HASH_KERNELS_H
-#define ARROW_COMPUTE_HASH_KERNELS_H
+#ifndef ARROW_COMPUTE_KERNELS_HASH_H
+#define ARROW_COMPUTE_KERNELS_HASH_H
 
 #include <memory>
 
 #include "arrow/compute/kernel.h"
 #include "arrow/status.h"
 #include "arrow/util/visibility.h"
+#include "arrow/type_fwd.h"
 
 namespace arrow {
-
-class Array;
-class ArrayData;
-class ChunkedArray;
-class Column;
-class DataType;
-
 namespace compute {
 
 class FunctionContext;
 
-class ARROW_EXPORT HashKernel : public OpKernel {
+/// \brief Invoke hash table kernel on input array, returning any output
+/// values. Implementations should be thread-safe
+class ARROW_EXPORT HashKernel : public UnaryKernel {
  public:
-  /// \brief Invoke hash table kernel on input array, returning any output
-  /// values. Implementations should be thread-safe
-  ///
-  /// \param[in] ctx a function context
-  /// \param[in] input the input array to process
-  /// \param[out] out any output arrays (may not return any)
-  /// \return Status
-  virtual Status Call(FunctionContext* ctx, const Array& input,
-                      std::vector<Datum>* out) = 0;
-
   virtual Status GetDictionary(std::shared_ptr<ArrayData>* out) = 0;
 };
 
@@ -102,4 +88,4 @@ Status CountValues(FunctionContext* context, const Datum& values,
 }  // compute
 }  // arrow
 
-#endif
+#endif  // ARROW_COMPUTE_KERNELS_HASH_H

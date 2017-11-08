@@ -808,7 +808,6 @@ class ARROW_EXPORT StructBuilder : public ArrayBuilder {
   std::vector<std::unique_ptr<ArrayBuilder>> field_builders_;
 };
 
-
 // ----------------------------------------------------------------------
 // Helper functions
 

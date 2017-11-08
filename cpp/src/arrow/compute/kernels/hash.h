@@ -22,8 +22,8 @@
 
 #include "arrow/compute/kernel.h"
 #include "arrow/status.h"
-#include "arrow/util/visibility.h"
 #include "arrow/type_fwd.h"
+#include "arrow/util/visibility.h"
 
 namespace arrow {
 namespace compute {
@@ -34,17 +34,19 @@ class FunctionContext;
 /// values. Implementations should be thread-safe
 class ARROW_EXPORT HashKernel : public UnaryKernel {
  public:
+  virtual Status Append(FunctionContext* ctx, const ArrayData& input) = 0;
+  virtual Status Flush(std::vector<Datum>* out) = 0;
   virtual Status GetDictionary(std::shared_ptr<ArrayData>* out) = 0;
 };
 
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status GetUniqueFunction(const DataType& in_type,
+Status GetUniqueFunction(const std::shared_ptr<DataType>& type,
                          std::unique_ptr<HashKernel>* kernel);
 
 ARROW_EXPORT
-Status GetDictionaryEncodeFunction(const DataType& in_type,
+Status GetDictionaryEncodeFunction(const std::shared_ptr<DataType>& type,
                                    std::unique_ptr<HashKernel>* kernel);
 
 /// \brief Compute unique elements from an array-like object
@@ -55,9 +57,7 @@ Status GetDictionaryEncodeFunction(const DataType& in_type,
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status Unique(FunctionContext* context, const Datum& datum,
-              std::shared_ptr<Array>* out);
-
+Status Unique(FunctionContext* context, const Datum& datum, std::shared_ptr<Array>* out);
 
 /// \brief Dictionary-encode values in an array-like object
 /// \param[in] context the FunctionContext
@@ -67,18 +67,15 @@ Status Unique(FunctionContext* context, const Datum& datum,
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status DictionaryEncode(FunctionContext* context, const Datum& datum,
-                        Datum* out);
+Status DictionaryEncode(FunctionContext* context, const Datum& datum, Datum* out);
 
 ARROW_EXPORT
-Status Match(FunctionContext* context, const Datum& values,
-             const Array& member_set,
-             std::shared_ptr<Array>* out);
+Status Match(FunctionContext* context, const Datum& values, const Datum& member_set,
+             Datum* out);
 
 ARROW_EXPORT
-Status IsIn(FunctionContext* context, const Datum& values,
-            const Array& member_set,
-            std::shared_ptr<Array>* out);
+Status IsIn(FunctionContext* context, const Datum& values, const Datum& member_set,
+            Datum* out);
 
 ARROW_EXPORT
 Status CountValues(FunctionContext* context, const Datum& values,

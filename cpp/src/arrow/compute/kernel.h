@@ -21,9 +21,9 @@
 #include <memory>
 
 #include "arrow/array.h"
+#include "arrow/table.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
-#include "arrow/table.h"
 
 namespace arrow {
 namespace compute {
@@ -44,13 +44,7 @@ struct ARROW_EXPORT Scalar {
 };
 
 struct ARROW_EXPORT Datum {
-  enum type {
-    SCALAR,
-    ARRAY,
-    CHUNKED_ARRAY,
-    RECORD_BATCH,
-    TABLE
-  };
+  enum type { SCALAR, ARRAY, CHUNKED_ARRAY, RECORD_BATCH, TABLE };
 
   type kind;
 
@@ -63,24 +57,23 @@ struct ARROW_EXPORT Datum {
   };
 
   explicit Datum(const std::shared_ptr<Scalar>& value)
-    : kind(Datum::SCALAR), scalar(value) {}
+      : kind(Datum::SCALAR), scalar(value) {}
 
   explicit Datum(const std::shared_ptr<ArrayData>& value)
-    : kind(Datum::ARRAY), array(value) {}
+      : kind(Datum::ARRAY), array(value) {}
 
   explicit Datum(const std::shared_ptr<ChunkedArray>& value)
-    : kind(Datum::CHUNKED_ARRAY), chunked_array(value) {}
+      : kind(Datum::CHUNKED_ARRAY), chunked_array(value) {}
 
   explicit Datum(const std::shared_ptr<RecordBatch>& value)
-    : kind(Datum::RECORD_BATCH), record_batch(value) {}
+      : kind(Datum::RECORD_BATCH), record_batch(value) {}
 
   explicit Datum(const std::shared_ptr<Table>& value)
-    : kind(Datum::TABLE), table(value) {}
+      : kind(Datum::TABLE), table(value) {}
 
   ~Datum() {}
 
-  Datum(const Datum& other) noexcept
-    : kind(other.kind) {
+  Datum(const Datum& other) noexcept : kind(other.kind) {
     switch (other.kind) {
       case Datum::SCALAR:
         this->scalar = other.scalar;
@@ -120,7 +113,7 @@ struct ARROW_EXPORT Datum {
 /// \brief An array-valued function of a single input argument
 class ARROW_EXPORT UnaryKernel : public OpKernel {
  public:
-  virtual Status Call(FunctionContext* ctx, const Array& input,
+  virtual Status Call(FunctionContext* ctx, const ArrayData& input,
                       std::vector<Datum>* out) = 0;
 };
 

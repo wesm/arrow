@@ -27,6 +27,7 @@
 #include "arrow/compute/context.h"
 #include "arrow/compute/kernel.h"
 #include "arrow/compute/kernels/util-internal.h"
+#include "arrow/util/hash-util.h"
 
 namespace arrow {
 namespace compute {
@@ -34,7 +35,7 @@ namespace compute {
 namespace {
 
 // Initially 1024 elements
-static constexpr int kInitialHashTableSize = 1 << 10;
+static constexpr int64_t kInitialHashTableSize = 1 << 10;
 
 typedef int32_t hash_slot_t;
 static constexpr hash_slot_t kHashSlotEmpty = std::numeric_limits<int32_t>::max();
@@ -42,11 +43,15 @@ static constexpr hash_slot_t kHashSlotEmpty = std::numeric_limits<int32_t>::max(
 // The maximum load factor for the hash table before resizing.
 static constexpr double kMaxHashTableLoad = 0.7;
 
-enum class SIMDMode : char {
-  NOSIMD,
-  SSE4,
-  AVX2
-};
+enum class SIMDMode : char { NOSIMD, SSE4, AVX2 };
+
+#define CHECK_IMPLEMENTED(KERNEL, _FUNCNAME_, TYPE)    \
+  if (!KERNEL) {                                       \
+    std::stringstream ss;                              \
+    ss << "_FUNCNAME_"                                 \
+       << " not implemented for " << type->ToString(); \
+    return Status::NotImplemented(ss.str());           \
+  }
 
 Status NewHashTable(int64_t size, MemoryPool* pool, std::shared_ptr<Buffer>* out) {
   auto hash_table = std::make_shared<PoolBuffer>(pool);
@@ -64,33 +69,26 @@ Status NewHashTable(int64_t size, MemoryPool* pool, std::shared_ptr<Buffer>* out
 // will raise an internal exception so that only the actions where errors can
 // occur will experience the extra overhead
 class HashException : public std::exception {
-  HashException(const char* msg, StatusCode code = StatusCode::Invalid)
-      : msg_(msg), code_(code) {}
-
+ public:
   HashException(const std::string& msg, StatusCode code = StatusCode::Invalid)
       : msg_(msg), code_(code) {}
-
-  HashException(const char* msg, std::exception& e)
-      : msg_(msg), code_(StatusCode::Invalid) {}
 
   ~HashException() throw() {}
 
   const char* what() const throw() override;
 
-  StatusCode code() { return code_; }
+  StatusCode code() const { return code_; }
 
  private:
   std::string msg_;
   StatusCode code_;
 };
 
-const char* HashException::what() const throw() {
-  return msg_.c_str();
-}
+const char* HashException::what() const throw() { return msg_.c_str(); }
 
 #define HASH_THROW_NOT_OK(EXPR)                     \
   do {                                              \
-    Status _s = (s);                                \
+    Status _s = (EXPR);                             \
     if (ARROW_PREDICT_FALSE(!_s.ok())) {            \
       throw HashException(_s.message(), _s.code()); \
     }                                               \
@@ -109,8 +107,9 @@ class HashTable {
 
   virtual ~HashTable() {}
 
-  virtual Status Append(const Array& input) = 0;
-  virtual Status GetDictionary(std::vector<Datum>* out) = 0;
+  virtual Status Append(const ArrayData& input) = 0;
+  virtual Status Flush(std::vector<Datum>* out) = 0;
+  virtual Status GetDictionary(std::shared_ptr<ArrayData>* out) = 0;
 
  protected:
   Status Init(int64_t elements);
@@ -125,18 +124,19 @@ class HashTable {
   hash_slot_t* hash_slots_;
 
   /// Size of the table. Must be a power of 2.
-  int hash_table_size_;
+  int64_t hash_table_size_;
 
   // Store hash_table_size_ - 1, so that j & mod_bitmask_ is equivalent to j %
   // hash_table_size_, but uses far fewer CPU cycles
-  int mod_bitmask_;
+  int64_t mod_bitmask_;
 };
 
 Status HashTable::Init(int64_t elements) {
-  RETURN_NOT_OK(NewHashTable(kInitialHashTableSize, pool_, &hash_table_));
+  DCHECK_EQ(elements, BitUtil::NextPower2(elements));
+  RETURN_NOT_OK(NewHashTable(elements, pool_, &hash_table_));
   hash_slots_ = reinterpret_cast<hash_slot_t*>(hash_table_->mutable_data());
-  hash_table_size_ = kInitialHashTableSize;
-  mod_bitmask_ = kInitialHashTableSize - 1;
+  hash_table_size_ = elements;
+  mod_bitmask_ = elements - 1;
   initialized_ = true;
   return Status::OK();
 }
@@ -150,17 +150,16 @@ class HashTableKernel : public HashTable {};
 // }
 
 // Linear probing
-#define HASH_PROBE(TABLE, TABLE_SIZE, DIFFERENT)                \
-  do {                                                          \
-    while (kHashSlotEmpty != slot && DIFFERENT(slot, value)) {  \
-      ++j;                                                      \
-      if (j == TABLE_SIZE) {                                    \
-        j = 0;                                                  \
-      }                                                         \
-      slot = TABLE[j];                                          \
-    }                                                           \
+#define HASH_PROBE(TABLE, TABLE_SIZE, DIFFERENT)               \
+  do {                                                         \
+    while (kHashSlotEmpty != slot && DIFFERENT(slot, value)) { \
+      ++j;                                                     \
+      if (j == TABLE_SIZE) {                                   \
+        j = 0;                                                 \
+      }                                                        \
+      slot = TABLE[j];                                         \
+    }                                                          \
   } while (false)
-
 
 // Types of hash actions
 //
@@ -185,28 +184,24 @@ struct HashDictionary<Type, enable_if_primitive_ctype<Type>> {
     return Resize(kInitialHashTableSize);
   }
 
-  Status DoubleSize() {
-    return Resize(this->size * 2);
-  }
+  Status DoubleSize() { return Resize(this->size * 2); }
 
   Status Resize(const int64_t elements) {
     RETURN_NOT_OK(this->buffer->Resize(elements * sizeof(T)));
 
     this->capacity = elements;
-    this->values = this->buffer->mutable_data();
+    this->values = reinterpret_cast<T*>(this->buffer->mutable_data());
     return Status::OK();
   }
 
   std::shared_ptr<ResizableBuffer> buffer;
   T* values;
-  int size;
-  int capacity;
+  int64_t size;
+  int64_t capacity;
 };
 
-
 template <typename Type, typename Action>
-class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
-    : public HashTable {
+class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public HashTable {
  public:
   using T = typename Type::c_type;
   using ArrayType = typename TypeTraits<Type>::ArrayType;
@@ -215,29 +210,33 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
 
   Status Init() {
     RETURN_NOT_OK(dict_.Init(pool_));
-    return HashTable::Init();
+    return HashTable::Init(kInitialHashTableSize);
   }
 
-  Status Append(const Array& arr) {
+  Status Append(const ArrayData& arr) override {
     if (!initialized_) {
       RETURN_NOT_OK(Init());
     }
 
-    const T* values = static_cast<const ArrayType&>(arr).raw_values();
+    const T* values = GetValues<T>(arr, 1);
     auto action = static_cast<Action*>(this);
 
-    RETURN_NOT_OK(action->Reserve(arr.length()));
+    RETURN_NOT_OK(action->Reserve(arr.length));
 
-    for (int64_t i = 0; i < arr.length(); ++i) {
+    for (int64_t i = 0; i < arr.length; ++i) {
       const T value = values[i];
 
-      int j = HashValue(value) & mod_bitmask_;
+      int64_t j = HashValue(value) & mod_bitmask_;
       hash_slot_t slot = hash_slots_[j];
 
       // Find an empty slot
-      HASH_PROBE(hash_slots_, hash_table_size_, SlotDifferent(slot, value));
+      HASH_PROBE(hash_slots_, hash_table_size_, SlotDifferent);
 
       if (slot == kHashSlotEmpty) {
+        if (!Action::allow_expand) {
+          throw HashException("Encountered new dictionary value");
+        }
+
         // Not in the hash table, so we insert it now
         slot = static_cast<hash_slot_t>(dict_.size);
         hash_slots_[j] = slot;
@@ -245,8 +244,7 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
 
         action->ObserveNotFound(slot);
 
-        if (ARROW_PREDICT_FALSE(dict_.size >
-                                hash_table_size_ * kMaxHashTableLoad)) {
+        if (ARROW_PREDICT_FALSE(dict_.size > hash_table_size_ * kMaxHashTableLoad)) {
           RETURN_NOT_OK(action->DoubleSize());
         }
       } else {
@@ -269,22 +267,22 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
 
  protected:
   bool SlotDifferent(const hash_slot_t slot, const T& value) const {
-    dict_.values[slot] != value;
+    return dict_.values[slot] != value;
   }
 
-  int HashValue(const T& value) const {
+  int64_t HashValue(const T& value) const {
     // TODO(wesm): Use faster hash function for C types
     return HashUtil::Hash(&value, sizeof(T), 0);
   }
 
   Status DoubleTableSize() {
-    int new_size = hash_table_size_ * 2;
+    int64_t new_size = hash_table_size_ * 2;
 
     std::shared_ptr<Buffer> new_hash_table;
     RETURN_NOT_OK(NewHashTable(new_size, pool_, &new_hash_table));
     int32_t* new_hash_slots =
-      reinterpret_cast<hash_slot_t*>(new_hash_table->mutable_data());
-    int new_mod_bitmask = new_size - 1;
+        reinterpret_cast<hash_slot_t*>(new_hash_table->mutable_data());
+    int64_t new_mod_bitmask = new_size - 1;
 
     for (int i = 0; i < hash_table_size_; ++i) {
       hash_slot_t index = hash_slots_[i];
@@ -298,10 +296,10 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
       const T value = dict_.values[index];
 
       // Find an empty slot in the new hash table
-      int j = HashValue(value) & new_mod_bitmask;
+      int64_t j = HashValue(value) & new_mod_bitmask;
       hash_slot_t slot = new_hash_slots[j];
 
-      HASH_PROBE(new_hash_slots, new_size, SlotDifferent(slot, value));
+      HASH_PROBE(new_hash_slots, new_size, SlotDifferent);
 
       // Copy the old slot index to the new hash table
       new_hash_slots[j] = index;
@@ -319,42 +317,36 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>>
 };
 
 template <typename Type>
-class UniqueImpl : public HashTableKernel<Type, UniqueImpl>  {
+class UniqueImpl : public HashTableKernel<Type, UniqueImpl<Type>> {
  public:
-  constexpr allow_expand = true;
-  using Base = HashTableKernel<Type, UniqueImpl>;
-  using Base::HashTableKernel;
+  static constexpr bool allow_expand = true;
+  using Base = HashTableKernel<Type, UniqueImpl<Type>>;
+  using Base::Base;
 
-  Status Reserve(const int64_t length) {
-    return Status::OK();
-  }
+  Status Reserve(const int64_t length) { return Status::OK(); }
 
   void ObserveFound(const hash_slot_t slot) {}
   void ObserveNotFound(const hash_slot_t slot) {}
 
-  Status DoubleSize() {
-    return DoubleTableSize();
-  }
+  Status DoubleSize() { return Base::DoubleTableSize(); }
 
-  Status Append(const Array& input) override {
-    return Base::Append(input);
+  Status Append(const ArrayData& input) override { return Base::Append(input); }
+
+  Status Flush(std::vector<Datum>* out) override {
+    // No-op
+    return Status::OK();
   }
 };
 
-
 template <typename Type>
-class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl> {
+class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
  public:
-  constexpr allow_expand = true;
+  static constexpr bool allow_expand = true;
   using Base = HashTableKernel<Type, DictEncodeImpl>;
 
-  DictEncodeImpl(MemoryPool* pool)
-      : Base(pool),
-        indices_builder_(pool) {}
+  DictEncodeImpl(MemoryPool* pool) : Base(pool), indices_builder_(pool) {}
 
-  Status Reserve(const int64_t length) {
-    return indices_builder_.Reserve(length);
-  }
+  Status Reserve(const int64_t length) { return indices_builder_.Reserve(length); }
 
   void ObserveFound(const hash_slot_t slot, const bool is_null) {
     if (is_null) {
@@ -368,8 +360,11 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl> {
     return ObserveFound(slot, is_null);
   }
 
-  Status DoubleSize() {
-    return DoubleTableSize();
+  Status DoubleSize() { return Base::DoubleTableSize(); }
+
+  Status Flush(std::vector<Datum>* out) override {
+    // TODO
+    return Status::OK();
   }
 
   using Base::Append;
@@ -382,20 +377,25 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl> {
 
 class HashKernelImpl : public HashKernel {
  public:
-  HashKernel(std::unique_ptr<HashTable> hasher)
-      : hasher_(std::move(hasher)) {}
+  HashKernelImpl(std::unique_ptr<HashTable> hasher) : hasher_(std::move(hasher)) {}
 
-  Status Call(FunctionContext* ctx, const Array& input,
+  Status Call(FunctionContext* ctx, const ArrayData& input,
               std::vector<Datum>* out) override {
+    RETURN_NOT_OK(Append(ctx, input));
+    return Flush(out);
+  }
+
+  Status Append(FunctionContext* ctx, const ArrayData& input) override {
     std::lock_guard<std::mutex> guard(lock_);
     try {
       RETURN_NOT_OK(hasher_->Append(input));
-      RETURN_NOT_OK(hasher_->Flush(out));
     } catch (const HashException& e) {
-      return Status::Invalid(e.what());
+      return Status(e.code(), e.what());
     }
     return Status::OK();
   }
+
+  Status Flush(std::vector<Datum>* out) override { return hasher_->Flush(out); }
 
   Status GetDictionary(std::shared_ptr<ArrayData>* out) override {
     return hasher_->GetDictionary(out);
@@ -406,16 +406,16 @@ class HashKernelImpl : public HashKernel {
   std::unique_ptr<HashTable> hasher_;
 };
 
-#define UNIQUE_FUNCTION_CASE(InType)                    \
-  case InType::type_id:                                 \
-    hasher.reset(new UniqueImpl<InType>(type, pool));   \
+#define UNIQUE_FUNCTION_CASE(InType)                  \
+  case InType::type_id:                               \
+    hasher.reset(new UniqueImpl<InType>(type, pool)); \
     break
 
-Status GetUniqueFunction(const DataType& in_type, MemoryPool* pool,
-                        std::unique_ptr<HashKernel>* out) {
-  std::unique_ptr<HashKernel> hasher;
+Status GetUniqueFunction(const std::shared_ptr<DataType>& type, MemoryPool* pool,
+                         std::unique_ptr<HashKernel>* out) {
+  std::unique_ptr<HashTable> hasher;
 
-  switch (in_type.id()) {
+  switch (type->id()) {
     // UNIQUE_FUNCTION_CASE(NullType);
     // UNIQUE_FUNCTION_CASE(BooleanType);
     UNIQUE_FUNCTION_CASE(UInt8Type);
@@ -440,61 +440,78 @@ Status GetUniqueFunction(const DataType& in_type, MemoryPool* pool,
       break;
   }
 
-  if (!hash_table) {
-    std::stringstream ss;
-    ss << "No unique function implemented for " << in_type.ToString();
-    return Status::NotImplemented(ss.str());
-  }
-
+  CHECK_IMPLEMENTED(hasher, "unique", type);
   out->reset(new HashKernelImpl(std::move(hasher)));
-
   return Status::OK();
 }
 
-Status Unique(FunctionContext* ctx, const Datum& value,
-              std::shared_ptr<Array>* out) {
+namespace {
+
+Status InvokeHash(FunctionContext* ctx, HashKernel* func, const Datum& value,
+                  std::vector<Datum>* kernel_outputs,
+                  std::shared_ptr<Array>* dictionary) {
+  if (value.kind == Datum::ARRAY) {
+    RETURN_NOT_OK(func->Call(ctx, *value.array, kernel_outputs));
+  } else if (value.kind == Datum::CHUNKED_ARRAY) {
+    const ChunkedArray& array = *value.chunked_array;
+    for (int i = 0; i < array.num_chunks(); i++) {
+      RETURN_NOT_OK(func->Call(ctx, *(array.chunk(i)->data()), kernel_outputs));
+    }
+  }
+  std::shared_ptr<ArrayData> dict_data;
+  RETURN_NOT_OK(func->GetDictionary(&dict_data));
+  *dictionary = MakeArray(dict_data);
+  return Status::OK();
+}
+
+}  // namespace
+
+Status Unique(FunctionContext* ctx, const Datum& value, std::shared_ptr<Array>* out) {
   // TODO(wesm): Must we be more rigorous than DCHECK
   DCHECK(value.is_arraylike());
 
   std::unique_ptr<HashKernel> func;
-  RETURN_NOT_OK(GetUniqueFunction(*value.type(), &func));
+  RETURN_NOT_OK(GetUniqueFunction(value.type(), &func));
 
-  std::vector<Datum> dummy_out;
-
-  if (value.kind == Datum::ARRAY) {
-    RETURN_NOT_OK(func->Call(ctx, value.array, &dummy_out));
-  } else if (value.kind == Datum::CHUNKED_ARRAY) {
-    for (int i = 0; i < array.num_chunks(); i++) {
-      RETURN_NOT_OK(func->Call(ctx, *array.chunk(i), &dummy_out));
-    }
-  }
-  std::shared_ptr<ArrayData> out_data;
-  RETURN_NOT_OK(func->GetDictionary(&out_data));
-  *out = MakeArray(out_data);
-  return Status::OK();
+  std::vector<Datum> dummy_outputs;
+  return InvokeHash(ctx, func.get(), value, &dummy_outputs, out);
 }
 
-// Status DictionaryEncode(FunctionContext* ctx, const Datum& value, Datum* out) {
-//   // TODO(wesm): Must we be more rigorous than DCHECK
-//   DCHECK(value.is_arraylike());
+Status DictionaryEncode(FunctionContext* ctx, const Datum& value, Datum* out) {
+  // TODO(wesm): Must we be more rigorous than DCHECK
+  DCHECK(value.is_arraylike());
 
-//   std::unique_ptr<HashKernel> func;
-//   RETURN_NOT_OK(GetDictionaryEncodeFunction(*value.type(), &func));
+  std::unique_ptr<HashKernel> func;
+  RETURN_NOT_OK(GetDictionaryEncodeFunction(value.type(), &func));
 
-//   std::vector<Datum> out;
+  std::shared_ptr<Array> dictionary;
+  std::vector<Datum> indices_outputs;
+  RETURN_NOT_OK(InvokeHash(ctx, func.get(), value, &indices_outputs, &dictionary));
 
-//   if (value.kind == Datum::ARRAY) {
-//     RETURN_NOT_OK(func->Call(ctx, value.array, &out));
-//   } else if (value.kind == Datum::CHUNKED_ARRAY) {
-//     for (int i = 0; i < array.num_chunks(); i++) {
-//       RETURN_NOT_OK(func->Call(ctx, *array.chunk(i), &out));
-//     }
-//   }
-//   std::shared_ptr<ArrayData> out_data;
-//   RETURN_NOT_OK(func->GetDictionary(&out_data));
-//   *out = MakeArray(out_data);
-//   return Status::OK();
-// }
+  // Create the dictionary type
+  DCHECK_EQ(indices_outputs[0].kind, Datum::ARRAY);
+  std::shared_ptr<DataType> dict_type =
+      ::arrow::dictionary(indices_outputs[0].array->type, dictionary);
+
+  // Create DictionaryArray for each piece yielded by the kernel invocations
+  std::vector<std::shared_ptr<Array>> dict_chunks;
+  for (const Datum& datum : indices_outputs) {
+    dict_chunks.emplace_back(std::make_shared<DictionaryArray>(dict_type,
+                                                               MakeArray(datum.array)));
+  }
+
+  // Create right kind of datum
+  // TODO(wesm): Create some generalizable pattern for this
+  if (value.kind == Datum::ARRAY) {
+    out->kind = Datum::ARRAY;
+    out->array = dict_chunks[0]->data();
+  } else if (value.kind == Datum::CHUNKED_ARRAY) {
+    out->kind = Datum::CHUNKED_ARRAY;
+    out->chunked_array = std::make_shared<ChunkedArray>(dict_chunks);
+  }
+
+  return Status::OK();
+}
 
 }  // compute
 }  // arrow

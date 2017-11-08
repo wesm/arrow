@@ -633,7 +633,8 @@ TEST_F(TestCast, PreallocatedMemory) {
   out_data->buffers.push_back(nullptr);
   out_data->buffers.push_back(out_values);
 
-  ASSERT_OK(kernel->Call(&this->ctx_, *arr, &out_data));
+  std::vector<Datum> out = {Datum(out_data)};
+  ASSERT_OK(kernel->Call(&this->ctx_, *arr->data(), &out));
 
   // Buffer address unchanged
   ASSERT_EQ(out_values.get(), out_data->buffers[1].get());

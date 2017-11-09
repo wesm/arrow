@@ -19,6 +19,7 @@
 #define ARROW_COMPUTE_KERNELS_HASH_H
 
 #include <memory>
+#include <vector>
 
 #include "arrow/compute/kernel.h"
 #include "arrow/status.h"
@@ -42,12 +43,13 @@ class ARROW_EXPORT HashKernel : public UnaryKernel {
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status GetUniqueFunction(const std::shared_ptr<DataType>& type,
-                         std::unique_ptr<HashKernel>* kernel);
+Status GetUniqueKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& type,
+                       std::unique_ptr<HashKernel>* kernel);
 
 ARROW_EXPORT
-Status GetDictionaryEncodeFunction(const std::shared_ptr<DataType>& type,
-                                   std::unique_ptr<HashKernel>* kernel);
+Status GetDictionaryEncodeKernel(FunctionContext* ctx,
+                                 const std::shared_ptr<DataType>& type,
+                                 std::unique_ptr<HashKernel>* kernel);
 
 /// \brief Compute unique elements from an array-like object
 /// \param[in] context the FunctionContext
@@ -61,28 +63,44 @@ Status Unique(FunctionContext* context, const Datum& datum, std::shared_ptr<Arra
 
 /// \brief Dictionary-encode values in an array-like object
 /// \param[in] context the FunctionContext
-/// \param[in] datum array-like input
+/// \param[in] data array-like input
 /// \param[out] out result with same shape and type as input
 ///
 /// \since 0.8.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Status DictionaryEncode(FunctionContext* context, const Datum& datum, Datum* out);
+Status DictionaryEncode(FunctionContext* context, const Datum& data, Datum* out);
 
-ARROW_EXPORT
-Status Match(FunctionContext* context, const Datum& values, const Datum& member_set,
-             Datum* out);
+// TODO(wesm): Define API for incremental dictionary encoding
 
-ARROW_EXPORT
-Status IsIn(FunctionContext* context, const Datum& values, const Datum& member_set,
-            Datum* out);
+// TODO(wesm): Define API for regularizing DictionaryArray objects with
+// different dictionaries
 
-ARROW_EXPORT
-Status CountValues(FunctionContext* context, const Datum& values,
-                   std::shared_ptr<Array>* out_uniques,
-                   std::shared_ptr<Array>* out_counts);
+// class DictionaryEncoder {
+//  public:
+//   virtual Encode(const Datum& data, Datum* out) = 0;
+// };
 
-}  // compute
-}  // arrow
+//
+// ARROW_EXPORT
+// Status DictionaryEncode(FunctionContext* context, const Datum& data,
+//                         const Array& prior_dictionary, Datum* out);
+
+// TODO(wesm): Implement these next
+// ARROW_EXPORT
+// Status Match(FunctionContext* context, const Datum& values, const Datum& member_set,
+//              Datum* out);
+
+// ARROW_EXPORT
+// Status IsIn(FunctionContext* context, const Datum& values, const Datum& member_set,
+//             Datum* out);
+
+// ARROW_EXPORT
+// Status CountValues(FunctionContext* context, const Datum& values,
+//                    std::shared_ptr<Array>* out_uniques,
+//                    std::shared_ptr<Array>* out_counts);
+
+}  // namespace compute
+}  // namespace arrow
 
 #endif  // ARROW_COMPUTE_KERNELS_HASH_H

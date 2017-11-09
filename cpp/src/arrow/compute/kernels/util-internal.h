@@ -43,9 +43,7 @@ inline T* GetMutableValues(const ArrayData* data, int i) {
   return reinterpret_cast<T*>(data->buffers[i]->mutable_data()) + data->offset;
 }
 
-namespace {
-
-inline void CopyData(const ArrayData& input, ArrayData* output) {
+static inline void CopyData(const ArrayData& input, ArrayData* output) {
   output->length = input.length;
   output->null_count = input.null_count;
   output->buffers = input.buffers;
@@ -53,9 +51,7 @@ inline void CopyData(const ArrayData& input, ArrayData* output) {
   output->child_data = input.child_data;
 }
 
-}  // namespace
-
-}  // compute
-}  // arrow
+}  // namespace compute
+}  // namespace arrow
 
 #endif  // ARROW_COMPUTE_KERNELS_UTIL_INTERNAL_H

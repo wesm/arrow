@@ -1028,8 +1028,12 @@ class CategoricalBlock : public PandasBlock {
     std::shared_ptr<Column> converted_col;
     if (options_.strings_to_categorical &&
         (col->type()->id() == Type::STRING || col->type()->id() == Type::BINARY)) {
-      RETURN_NOT_OK(EncodeColumnToDictionary(static_cast<const Column&>(*col), pool_,
-                                             &converted_col));
+      FunctionContext ctx(pool_);
+
+      compute::Datum out;
+      RETURN_NOT_OK(compute::DictionaryEncode(&ctx, Datum(col->data()), &out));
+      DCHECK_EQ(out.kind, compute::Datum::CHUNKED_ARRAY);
+      converted_col = std::make_shared<Column>(col->field(), out.chunked_array);
     } else {
       converted_col = col;
     }

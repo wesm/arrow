@@ -26,6 +26,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "arrow/array.h"
 #include "arrow/buffer.h"
@@ -727,7 +728,7 @@ class CastKernel : public UnaryKernel {
       out->emplace_back(std::make_shared<ArrayData>(out_type_, input.length));
     }
 
-    result = (*out)[0].array.get();
+    result = (*out)[0].array().get();
 
     if (!is_zero_copy_) {
       RETURN_NOT_OK(
@@ -918,7 +919,7 @@ Status Cast(FunctionContext* ctx, const Array& array,
 
   std::vector<Datum> result;
   RETURN_NOT_OK(func->Call(ctx, *array.data(), &result));
-  *out = MakeArray(result[0].array);
+  *out = MakeArray(result[0].array());
   return Status::OK();
 }
 

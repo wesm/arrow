@@ -22,6 +22,8 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <string>
+#include <vector>
 
 #include "arrow/builder.h"
 #include "arrow/compute/context.h"
@@ -45,12 +47,12 @@ static constexpr double kMaxHashTableLoad = 0.7;
 
 enum class SIMDMode : char { NOSIMD, SSE4, AVX2 };
 
-#define CHECK_IMPLEMENTED(KERNEL, _FUNCNAME_, TYPE)    \
-  if (!KERNEL) {                                       \
-    std::stringstream ss;                              \
-    ss << "_FUNCNAME_"                                 \
-       << " not implemented for " << type->ToString(); \
-    return Status::NotImplemented(ss.str());           \
+#define CHECK_IMPLEMENTED(KERNEL, FUNCNAME, TYPE)       \
+  if (!KERNEL) {                                        \
+    std::stringstream ss;                               \
+    ss << FUNCNAME                                      \
+       << " not implemented for " << type->ToString();  \
+    return Status::NotImplemented(ss.str());            \
   }
 
 Status NewHashTable(int64_t size, MemoryPool* pool, std::shared_ptr<Buffer>* out) {
@@ -70,7 +72,7 @@ Status NewHashTable(int64_t size, MemoryPool* pool, std::shared_ptr<Buffer>* out
 // occur will experience the extra overhead
 class HashException : public std::exception {
  public:
-  HashException(const std::string& msg, StatusCode code = StatusCode::Invalid)
+  explicit HashException(const std::string& msg, StatusCode code = StatusCode::Invalid)
       : msg_(msg), code_(code) {}
 
   ~HashException() throw() {}
@@ -223,6 +225,8 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
 
     RETURN_NOT_OK(action->Reserve(arr.length));
 
+    internal::BitmapReader valid_reader(arr.buffers[0]->data(), arr.offset, arr.length);
+
     for (int64_t i = 0; i < arr.length; ++i) {
       const T value = values[i];
 
@@ -242,14 +246,15 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
         hash_slots_[j] = slot;
         dict_.values[dict_.size++] = value;
 
-        action->ObserveNotFound(slot);
+        action->ObserveNotFound(slot, valid_reader.IsNotSet());
 
         if (ARROW_PREDICT_FALSE(dict_.size > hash_table_size_ * kMaxHashTableLoad)) {
           RETURN_NOT_OK(action->DoubleSize());
         }
       } else {
-        action->ObserveFound(slot);
+        action->ObserveFound(slot, valid_reader.IsNotSet());
       }
+      valid_reader.Next();
     }
 
     return Status::OK();
@@ -325,8 +330,8 @@ class UniqueImpl : public HashTableKernel<Type, UniqueImpl<Type>> {
 
   Status Reserve(const int64_t length) { return Status::OK(); }
 
-  void ObserveFound(const hash_slot_t slot) {}
-  void ObserveNotFound(const hash_slot_t slot) {}
+  void ObserveFound(const hash_slot_t slot, const bool is_null) {}
+  void ObserveNotFound(const hash_slot_t slot, const bool is_null) {}
 
   Status DoubleSize() { return Base::DoubleTableSize(); }
 
@@ -344,7 +349,8 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
   static constexpr bool allow_expand = true;
   using Base = HashTableKernel<Type, DictEncodeImpl>;
 
-  DictEncodeImpl(MemoryPool* pool) : Base(pool), indices_builder_(pool) {}
+  DictEncodeImpl(const std::shared_ptr<DataType>& type, MemoryPool* pool)
+      : Base(type, pool), indices_builder_(pool) {}
 
   Status Reserve(const int64_t length) { return indices_builder_.Reserve(length); }
 
@@ -377,7 +383,8 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
 
 class HashKernelImpl : public HashKernel {
  public:
-  HashKernelImpl(std::unique_ptr<HashTable> hasher) : hasher_(std::move(hasher)) {}
+  explicit HashKernelImpl(std::unique_ptr<HashTable> hasher)
+      : hasher_(std::move(hasher)) {}
 
   Status Call(FunctionContext* ctx, const ArrayData& input,
               std::vector<Datum>* out) override {
@@ -406,41 +413,85 @@ class HashKernelImpl : public HashKernel {
   std::unique_ptr<HashTable> hasher_;
 };
 
-#define UNIQUE_FUNCTION_CASE(InType)                  \
-  case InType::type_id:                               \
-    hasher.reset(new UniqueImpl<InType>(type, pool)); \
-    break
-
-Status GetUniqueFunction(const std::shared_ptr<DataType>& type, MemoryPool* pool,
-                         std::unique_ptr<HashKernel>* out) {
+Status GetUniqueKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& type,
+                       std::unique_ptr<HashKernel>* out) {
   std::unique_ptr<HashTable> hasher;
 
+#define UNIQUE_CASE(InType)                                         \
+  case InType::type_id:                                             \
+    hasher.reset(new UniqueImpl<InType>(type, ctx->memory_pool())); \
+    break
+
   switch (type->id()) {
-    // UNIQUE_FUNCTION_CASE(NullType);
-    // UNIQUE_FUNCTION_CASE(BooleanType);
-    UNIQUE_FUNCTION_CASE(UInt8Type);
-    UNIQUE_FUNCTION_CASE(Int8Type);
-    UNIQUE_FUNCTION_CASE(UInt16Type);
-    UNIQUE_FUNCTION_CASE(Int16Type);
-    UNIQUE_FUNCTION_CASE(UInt32Type);
-    UNIQUE_FUNCTION_CASE(Int32Type);
-    UNIQUE_FUNCTION_CASE(UInt64Type);
-    UNIQUE_FUNCTION_CASE(Int64Type);
-    UNIQUE_FUNCTION_CASE(FloatType);
-    UNIQUE_FUNCTION_CASE(DoubleType);
-    // UNIQUE_FUNCTION_CASE(Date32Type);
-    // UNIQUE_FUNCTION_CASE(Date64Type);
-    // UNIQUE_FUNCTION_CASE(Time32Type);
-    // UNIQUE_FUNCTION_CASE(Time64Type);
-    // UNIQUE_FUNCTION_CASE(TimestampType);
-    // UNIQUE_FUNCTION_CASE(BinaryType);
-    // UNIQUE_FUNCTION_CASE(StringType);
-    // UNIQUE_FUNCTION_CASE(FixedSizeBinaryType);
+    // UNIQUE_CASE(NullType);
+    // UNIQUE_CASE(BooleanType);
+    UNIQUE_CASE(UInt8Type);
+    UNIQUE_CASE(Int8Type);
+    UNIQUE_CASE(UInt16Type);
+    UNIQUE_CASE(Int16Type);
+    UNIQUE_CASE(UInt32Type);
+    UNIQUE_CASE(Int32Type);
+    UNIQUE_CASE(UInt64Type);
+    UNIQUE_CASE(Int64Type);
+    UNIQUE_CASE(FloatType);
+    UNIQUE_CASE(DoubleType);
+    // UNIQUE_CASE(Date32Type);
+    // UNIQUE_CASE(Date64Type);
+    // UNIQUE_CASE(Time32Type);
+    // UNIQUE_CASE(Time64Type);
+    // UNIQUE_CASE(TimestampType);
+    // UNIQUE_CASE(BinaryType);
+    // UNIQUE_CASE(StringType);
+    // UNIQUE_CASE(FixedSizeBinaryType);
     default:
       break;
   }
 
+#undef UNIQUE_CASE
+
   CHECK_IMPLEMENTED(hasher, "unique", type);
+  out->reset(new HashKernelImpl(std::move(hasher)));
+  return Status::OK();
+}
+
+Status GetDictionaryEncodeKernel(FunctionContext* ctx,
+                                 const std::shared_ptr<DataType>& type,
+                                 std::unique_ptr<HashKernel>* out) {
+  std::unique_ptr<HashTable> hasher;
+
+#define DICTIONARY_ENCODE_CASE(InType)                                  \
+  case InType::type_id:                                                 \
+    hasher.reset(new DictEncodeImpl<InType>(type, ctx->memory_pool())); \
+    break
+
+  switch (type->id()) {
+    // DICTIONARY_ENCODE_CASE(NullType);
+    // DICTIONARY_ENCODE_CASE(BooleanType);
+    DICTIONARY_ENCODE_CASE(UInt8Type);
+    DICTIONARY_ENCODE_CASE(Int8Type);
+    DICTIONARY_ENCODE_CASE(UInt16Type);
+    DICTIONARY_ENCODE_CASE(Int16Type);
+    DICTIONARY_ENCODE_CASE(UInt32Type);
+    DICTIONARY_ENCODE_CASE(Int32Type);
+    DICTIONARY_ENCODE_CASE(UInt64Type);
+    DICTIONARY_ENCODE_CASE(Int64Type);
+    DICTIONARY_ENCODE_CASE(FloatType);
+    DICTIONARY_ENCODE_CASE(DoubleType);
+    // DICTIONARY_ENCODE_CASE(Date32Type);
+    // DICTIONARY_ENCODE_CASE(Date64Type);
+    // DICTIONARY_ENCODE_CASE(Time32Type);
+    // DICTIONARY_ENCODE_CASE(Time64Type);
+    // DICTIONARY_ENCODE_CASE(TimestampType);
+    // DICTIONARY_ENCODE_CASE(BinaryType);
+    // DICTIONARY_ENCODE_CASE(StringType);
+    // DICTIONARY_ENCODE_CASE(FixedSizeBinaryType);
+    default:
+      break;
+  }
+
+#undef DICTIONARY_ENCODE_CASE
+
+  CHECK_IMPLEMENTED(hasher, "dictionary-encode", type);
   out->reset(new HashKernelImpl(std::move(hasher)));
   return Status::OK();
 }
@@ -450,10 +501,10 @@ namespace {
 Status InvokeHash(FunctionContext* ctx, HashKernel* func, const Datum& value,
                   std::vector<Datum>* kernel_outputs,
                   std::shared_ptr<Array>* dictionary) {
-  if (value.kind == Datum::ARRAY) {
-    RETURN_NOT_OK(func->Call(ctx, *value.array, kernel_outputs));
-  } else if (value.kind == Datum::CHUNKED_ARRAY) {
-    const ChunkedArray& array = *value.chunked_array;
+  if (value.kind() == Datum::ARRAY) {
+    RETURN_NOT_OK(func->Call(ctx, *value.array(), kernel_outputs));
+  } else if (value.kind() == Datum::CHUNKED_ARRAY) {
+    const ChunkedArray& array = *value.chunked_array();
     for (int i = 0; i < array.num_chunks(); i++) {
       RETURN_NOT_OK(func->Call(ctx, *(array.chunk(i)->data()), kernel_outputs));
     }
@@ -471,7 +522,7 @@ Status Unique(FunctionContext* ctx, const Datum& value, std::shared_ptr<Array>* 
   DCHECK(value.is_arraylike());
 
   std::unique_ptr<HashKernel> func;
-  RETURN_NOT_OK(GetUniqueFunction(value.type(), &func));
+  RETURN_NOT_OK(GetUniqueKernel(ctx, value.type(), &func));
 
   std::vector<Datum> dummy_outputs;
   return InvokeHash(ctx, func.get(), value, &dummy_outputs, out);
@@ -482,36 +533,34 @@ Status DictionaryEncode(FunctionContext* ctx, const Datum& value, Datum* out) {
   DCHECK(value.is_arraylike());
 
   std::unique_ptr<HashKernel> func;
-  RETURN_NOT_OK(GetDictionaryEncodeFunction(value.type(), &func));
+  RETURN_NOT_OK(GetDictionaryEncodeKernel(ctx, value.type(), &func));
 
   std::shared_ptr<Array> dictionary;
   std::vector<Datum> indices_outputs;
   RETURN_NOT_OK(InvokeHash(ctx, func.get(), value, &indices_outputs, &dictionary));
 
   // Create the dictionary type
-  DCHECK_EQ(indices_outputs[0].kind, Datum::ARRAY);
+  DCHECK_EQ(indices_outputs[0].kind(), Datum::ARRAY);
   std::shared_ptr<DataType> dict_type =
-      ::arrow::dictionary(indices_outputs[0].array->type, dictionary);
+      ::arrow::dictionary(indices_outputs[0].array()->type, dictionary);
 
   // Create DictionaryArray for each piece yielded by the kernel invocations
   std::vector<std::shared_ptr<Array>> dict_chunks;
   for (const Datum& datum : indices_outputs) {
-    dict_chunks.emplace_back(std::make_shared<DictionaryArray>(dict_type,
-                                                               MakeArray(datum.array)));
+    dict_chunks.emplace_back(
+        std::make_shared<DictionaryArray>(dict_type, MakeArray(datum.array())));
   }
 
   // Create right kind of datum
   // TODO(wesm): Create some generalizable pattern for this
-  if (value.kind == Datum::ARRAY) {
-    out->kind = Datum::ARRAY;
-    out->array = dict_chunks[0]->data();
-  } else if (value.kind == Datum::CHUNKED_ARRAY) {
-    out->kind = Datum::CHUNKED_ARRAY;
-    out->chunked_array = std::make_shared<ChunkedArray>(dict_chunks);
+  if (value.kind() == Datum::ARRAY) {
+    out->value = dict_chunks[0]->data();
+  } else if (value.kind() == Datum::CHUNKED_ARRAY) {
+    out->value = std::make_shared<ChunkedArray>(dict_chunks);
   }
 
   return Status::OK();
 }
 
-}  // compute
-}  // arrow
+}  // namespace compute
+}  // namespace arrow

@@ -19,6 +19,9 @@
 #define ARROW_COMPUTE_KERNEL_H
 
 #include <memory>
+#include <vector>
+
+#include <boost/variant.hpp>
 
 #include "arrow/array.h"
 #include "arrow/table.h"
@@ -37,6 +40,7 @@ class ARROW_EXPORT OpKernel {
   virtual ~OpKernel() = default;
 };
 
+/// \brief Placeholder for Scalar values until we implement these
 struct ARROW_EXPORT Scalar {
   ~Scalar() {}
 
@@ -44,66 +48,77 @@ struct ARROW_EXPORT Scalar {
 };
 
 struct ARROW_EXPORT Datum {
-  enum type { SCALAR, ARRAY, CHUNKED_ARRAY, RECORD_BATCH, TABLE };
+  enum type { NONE, SCALAR, ARRAY, CHUNKED_ARRAY, RECORD_BATCH, TABLE };
 
-  type kind;
+  boost::variant<decltype(NULLPTR),
+                 std::shared_ptr<Scalar>,
+                 std::shared_ptr<ArrayData>,
+                 std::shared_ptr<ChunkedArray>,
+                 std::shared_ptr<RecordBatch>,
+                 std::shared_ptr<Table>> value;
 
-  union {
-    std::shared_ptr<Scalar> scalar;
-    std::shared_ptr<ArrayData> array;
-    std::shared_ptr<ChunkedArray> chunked_array;
-    std::shared_ptr<RecordBatch> record_batch;
-    std::shared_ptr<Table> table;
-  };
+  /// \brief Empty datum, to be populated elsewhere
+  Datum() : value(nullptr) {}
 
   explicit Datum(const std::shared_ptr<Scalar>& value)
-      : kind(Datum::SCALAR), scalar(value) {}
+      : value(value) {}
 
   explicit Datum(const std::shared_ptr<ArrayData>& value)
-      : kind(Datum::ARRAY), array(value) {}
+    : value(value) {}
+
+  explicit Datum(const std::shared_ptr<Array>& value) : Datum(value->data()) {}
 
   explicit Datum(const std::shared_ptr<ChunkedArray>& value)
-      : kind(Datum::CHUNKED_ARRAY), chunked_array(value) {}
+      : value(value) {}
 
   explicit Datum(const std::shared_ptr<RecordBatch>& value)
-      : kind(Datum::RECORD_BATCH), record_batch(value) {}
+      : value(value) {}
 
   explicit Datum(const std::shared_ptr<Table>& value)
-      : kind(Datum::TABLE), table(value) {}
+      : value(value) {}
 
   ~Datum() {}
 
-  Datum(const Datum& other) noexcept : kind(other.kind) {
-    switch (other.kind) {
-      case Datum::SCALAR:
-        this->scalar = other.scalar;
-        break;
-      case Datum::ARRAY:
-        this->array = other.array;
-        break;
-      case Datum::CHUNKED_ARRAY:
-        this->chunked_array = other.chunked_array;
-        break;
-      case Datum::RECORD_BATCH:
-        this->record_batch = other.record_batch;
-        break;
-      case Datum::TABLE:
-        this->table = other.table;
-        break;
+  Datum(const Datum& other) noexcept {
+    this->value = other.value;
+  }
+
+  Datum::type kind() const {
+    switch (this->value.which()) {
+      case 0:
+        return Datum::NONE;
+      case 1:
+        return Datum::SCALAR;
+      case 2:
+        return Datum::ARRAY;
+      case 3:
+        return Datum::CHUNKED_ARRAY;
+      case 4:
+        return Datum::RECORD_BATCH;
+      case 5:
+        return Datum::TABLE;
       default:
-        break;
+        return Datum::NONE;
     }
   }
 
+  std::shared_ptr<ArrayData> array() const {
+    return boost::get<std::shared_ptr<ArrayData>>(this->value);
+  }
+
+  std::shared_ptr<ChunkedArray> chunked_array() const {
+    return boost::get<std::shared_ptr<ChunkedArray>>(this->value);
+  }
+
   bool is_arraylike() const {
-    return this->kind == Datum::ARRAY || this->kind == Datum::CHUNKED_ARRAY;
+    return this->kind() == Datum::ARRAY || this->kind() == Datum::CHUNKED_ARRAY;
   }
 
   std::shared_ptr<DataType> type() const {
-    if (this->kind == Datum::ARRAY) {
-      return this->array->type;
-    } else if (this->kind == Datum::CHUNKED_ARRAY) {
-      return this->chunked_array->type();
+    if (this->kind() == Datum::ARRAY) {
+      return boost::get<std::shared_ptr<ArrayData>>(this->value)->type;
+    } else if (this->kind() == Datum::CHUNKED_ARRAY) {
+      return boost::get<std::shared_ptr<ChunkedArray>>(this->value)->type();
     }
     return nullptr;
   }

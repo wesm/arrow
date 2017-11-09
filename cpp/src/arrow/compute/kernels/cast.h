@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef ARROW_COMPUTE_CAST_H
-#define ARROW_COMPUTE_CAST_H
+#ifndef ARROW_COMPUTE_KERNELS_CAST_H
+#define ARROW_COMPUTE_KERNELS_CAST_H
 
 #include <memory>
 
@@ -71,4 +71,4 @@ Status Cast(FunctionContext* context, const Datum& value,
 }  // namespace compute
 }  // namespace arrow
 
-#endif  // ARROW_COMPUTE_CAST_H
+#endif  // ARROW_COMPUTE_KERNELS_CAST_H

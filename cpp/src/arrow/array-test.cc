@@ -402,10 +402,6 @@ typedef ::testing::Types<PBoolean, PUInt8, PUInt16, PUInt32, PUInt64, PInt8, PIn
 
 TYPED_TEST_CASE(TestPrimitiveBuilder, Primitives);
 
-#define DECL_T() typedef typename TestFixture::T T;
-
-#define DECL_TYPE() typedef typename TestFixture::Type Type;
-
 TYPED_TEST(TestPrimitiveBuilder, TestInit) {
   DECL_TYPE();
 

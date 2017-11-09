@@ -203,6 +203,36 @@ struct HashDictionary<Type, enable_if_primitive_ctype<Type>> {
 };
 
 template <typename Type, typename Action>
+class HashTableKernel<Type, Action, enable_if_null<Type>> : public HashTable {
+ public:
+  using HashTable::HashTable;
+
+  Status Init() {
+    // No-op, do not even need to initialize hash table
+    return Status::OK();
+  }
+
+  Status Append(const ArrayData& arr) override {
+    if (!initialized_) {
+      RETURN_NOT_OK(Init());
+    }
+    auto action = static_cast<Action*>(this);
+    RETURN_NOT_OK(action->Reserve(arr.length));
+    for (int64_t i = 0; i < arr.length; ++i) {
+      action->ObserveNull();
+    }
+    return Status::OK();
+  }
+
+  Status GetDictionary(std::shared_ptr<ArrayData>* out) override {
+    // TODO(wesm): handle null being a valid dictionary value
+    auto null_array = std::make_shared<NullArray>(0);
+    *out = null_array->data();
+    return Status::OK();
+  }
+};
+
+template <typename Type, typename Action>
 class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public HashTable {
  public:
   using T = typename Type::c_type;
@@ -229,6 +259,13 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
 
     for (int64_t i = 0; i < arr.length; ++i) {
       const T value = values[i];
+      const bool is_null = valid_reader.IsNotSet();
+      valid_reader.Next();
+
+      if (is_null) {
+        action->ObserveNull();
+        continue;
+      }
 
       int64_t j = HashValue(value) & mod_bitmask_;
       hash_slot_t slot = hash_slots_[j];
@@ -246,15 +283,14 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
         hash_slots_[j] = slot;
         dict_.values[dict_.size++] = value;
 
-        action->ObserveNotFound(slot, valid_reader.IsNotSet());
+        action->ObserveNotFound(slot);
 
         if (ARROW_PREDICT_FALSE(dict_.size > hash_table_size_ * kMaxHashTableLoad)) {
           RETURN_NOT_OK(action->DoubleSize());
         }
       } else {
-        action->ObserveFound(slot, valid_reader.IsNotSet());
+        action->ObserveFound(slot);
       }
-      valid_reader.Next();
     }
 
     return Status::OK();
@@ -330,8 +366,9 @@ class UniqueImpl : public HashTableKernel<Type, UniqueImpl<Type>> {
 
   Status Reserve(const int64_t length) { return Status::OK(); }
 
-  void ObserveFound(const hash_slot_t slot, const bool is_null) {}
-  void ObserveNotFound(const hash_slot_t slot, const bool is_null) {}
+  void ObserveFound(const hash_slot_t slot) {}
+  void ObserveNull() {}
+  void ObserveNotFound(const hash_slot_t slot) {}
 
   Status DoubleSize() { return Base::DoubleTableSize(); }
 
@@ -354,16 +391,16 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
 
   Status Reserve(const int64_t length) { return indices_builder_.Reserve(length); }
 
-  void ObserveFound(const hash_slot_t slot, const bool is_null) {
-    if (is_null) {
-      HASH_THROW_NOT_OK(indices_builder_.AppendNull());
-    } else {
-      HASH_THROW_NOT_OK(indices_builder_.Append(slot));
-    }
+  void ObserveNull() {
+    HASH_THROW_NOT_OK(indices_builder_.AppendNull());
   }
 
-  void ObserveNotFound(const hash_slot_t slot, const bool is_null) {
-    return ObserveFound(slot, is_null);
+  void ObserveFound(const hash_slot_t slot) {
+    HASH_THROW_NOT_OK(indices_builder_.Append(slot));
+  }
+
+  void ObserveNotFound(const hash_slot_t slot) {
+    return ObserveFound(slot);
   }
 
   Status DoubleSize() { return Base::DoubleTableSize(); }
@@ -423,7 +460,7 @@ Status GetUniqueKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& ty
     break
 
   switch (type->id()) {
-    // UNIQUE_CASE(NullType);
+    UNIQUE_CASE(NullType);
     // UNIQUE_CASE(BooleanType);
     UNIQUE_CASE(UInt8Type);
     UNIQUE_CASE(Int8Type);
@@ -465,7 +502,7 @@ Status GetDictionaryEncodeKernel(FunctionContext* ctx,
     break
 
   switch (type->id()) {
-    // DICTIONARY_ENCODE_CASE(NullType);
+    DICTIONARY_ENCODE_CASE(NullType);
     // DICTIONARY_ENCODE_CASE(BooleanType);
     DICTIONARY_ENCODE_CASE(UInt8Type);
     DICTIONARY_ENCODE_CASE(Int8Type);

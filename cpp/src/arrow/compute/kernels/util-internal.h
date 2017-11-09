@@ -31,6 +31,22 @@ using enable_if_primitive_ctype =
     typename std::enable_if<std::is_base_of<PrimitiveCType, T>::value>::type;
 
 template <typename T>
+using enable_if_null =
+    typename std::enable_if<std::is_same<NullType, T>::value>::type;
+
+template <typename T>
+using enable_if_binary =
+    typename std::enable_if<std::is_base_of<BinaryType, T>::value>::type;
+
+template <typename T>
+using enable_if_fixed_size_binary =
+    typename std::enable_if<std::is_base_of<FixedSizeBinaryType, T>::value>::type;
+
+template <typename T>
+using enable_if_list =
+    typename std::enable_if<std::is_base_of<ListType, T>::value>::type;
+
+template <typename T>
 using enable_if_number = typename std::enable_if<is_number<T>::value>::type;
 
 template <typename T>

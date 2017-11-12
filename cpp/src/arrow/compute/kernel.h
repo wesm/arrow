@@ -50,38 +50,29 @@ struct ARROW_EXPORT Scalar {
 struct ARROW_EXPORT Datum {
   enum type { NONE, SCALAR, ARRAY, CHUNKED_ARRAY, RECORD_BATCH, TABLE };
 
-  boost::variant<decltype(NULLPTR),
-                 std::shared_ptr<Scalar>,
-                 std::shared_ptr<ArrayData>,
-                 std::shared_ptr<ChunkedArray>,
-                 std::shared_ptr<RecordBatch>,
-                 std::shared_ptr<Table>> value;
+  boost::variant<decltype(NULLPTR), std::shared_ptr<Scalar>, std::shared_ptr<ArrayData>,
+                 std::shared_ptr<ChunkedArray>, std::shared_ptr<RecordBatch>,
+                 std::shared_ptr<Table>>
+      value;
 
   /// \brief Empty datum, to be populated elsewhere
   Datum() : value(nullptr) {}
 
-  explicit Datum(const std::shared_ptr<Scalar>& value)
-      : value(value) {}
+  explicit Datum(const std::shared_ptr<Scalar>& value) : value(value) {}
 
-  explicit Datum(const std::shared_ptr<ArrayData>& value)
-    : value(value) {}
+  explicit Datum(const std::shared_ptr<ArrayData>& value) : value(value) {}
 
   explicit Datum(const std::shared_ptr<Array>& value) : Datum(value->data()) {}
 
-  explicit Datum(const std::shared_ptr<ChunkedArray>& value)
-      : value(value) {}
+  explicit Datum(const std::shared_ptr<ChunkedArray>& value) : value(value) {}
 
-  explicit Datum(const std::shared_ptr<RecordBatch>& value)
-      : value(value) {}
+  explicit Datum(const std::shared_ptr<RecordBatch>& value) : value(value) {}
 
-  explicit Datum(const std::shared_ptr<Table>& value)
-      : value(value) {}
+  explicit Datum(const std::shared_ptr<Table>& value) : value(value) {}
 
   ~Datum() {}
 
-  Datum(const Datum& other) noexcept {
-    this->value = other.value;
-  }
+  Datum(const Datum& other) noexcept { this->value = other.value; }
 
   Datum::type kind() const {
     switch (this->value.which()) {

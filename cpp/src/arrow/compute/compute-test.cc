@@ -686,14 +686,18 @@ class TestHashKernelPrimitive : public ComputeFixture, public TestBase {
  public:
   using T = typename Type::c_type;
 
-  void CheckUnique(const vector<T>& in_values, const vector<T>& out_values,
-                   const vector<bool>& is_valid) {
+  void CheckUnique(const vector<T>& in_values, const vector<bool>& in_is_valid,
+                   const vector<T>& out_values, const vector<bool>& out_is_valid) {
     shared_ptr<Array> input, expected;
-    if (is_valid.size() > 0) {
-      ArrayFromVector<Type, T>(is_valid, in_values, &input);
-      ArrayFromVector<Type, T>(is_valid, out_values, &expected);
+    if (in_is_valid.size() > 0) {
+      ArrayFromVector<Type, T>(in_is_valid, in_values, &input);
     } else {
       ArrayFromVector<Type, T>(in_values, &input);
+    }
+
+    if (out_is_valid.size() > 0) {
+      ArrayFromVector<Type, T>(out_is_valid, out_values, &expected);
+    } else {
       ArrayFromVector<Type, T>(out_values, &expected);
     }
 
@@ -710,13 +714,7 @@ typedef ::testing::Types<Int8Type, UInt8Type, Int16Type, UInt16Type, Int32Type,
 TYPED_TEST_CASE(TestHashKernelPrimitive, PrimitiveDictionaries);
 
 TYPED_TEST(TestHashKernelPrimitive, EncodeBasic) {
-  DECL_T();
-
-  vector<bool> is_valid = {true, false, true, true};
-  vector<T> values1 = {2, 1, 2, 1};
-  vector<T> expected1 = {2, 1};
-
-  this->CheckUnique(values1, expected1, is_valid);
+  this->CheckUnique({2, 1, 2, 1}, {true, false, true, true}, {2, 1}, {});
 }
 
 // TYPED_TEST(TestDictionaryEncode, Basic) {

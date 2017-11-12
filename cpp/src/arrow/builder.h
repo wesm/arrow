@@ -123,6 +123,18 @@ class ARROW_EXPORT ArrayBuilder {
 
   std::shared_ptr<DataType> type() const { return type_; }
 
+  // Unsafe operations (don't check capacity/don't resize)
+
+  // Append to null bitmap.
+  void UnsafeAppendToBitmap(bool is_valid) {
+    if (is_valid) {
+      BitUtil::SetBit(null_bitmap_data_, length_);
+    } else {
+      ++null_count_;
+    }
+    ++length_;
+  }
+
  protected:
   ArrayBuilder() {}
 
@@ -142,18 +154,6 @@ class ARROW_EXPORT ArrayBuilder {
   std::vector<std::unique_ptr<ArrayBuilder>> children_;
 
   void Reset();
-
-  // Unsafe operations (don't check capacity/don't resize)
-
-  // Append to null bitmap.
-  void UnsafeAppendToBitmap(bool is_valid) {
-    if (is_valid) {
-      BitUtil::SetBit(null_bitmap_data_, length_);
-    } else {
-      ++null_count_;
-    }
-    ++length_;
-  }
 
   // Vector append. Treat each zero byte as a nullzero. If valid_bytes is null
   // assume all of length bits are valid.

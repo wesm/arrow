@@ -47,12 +47,11 @@ static constexpr double kMaxHashTableLoad = 0.7;
 
 enum class SIMDMode : char { NOSIMD, SSE4, AVX2 };
 
-#define CHECK_IMPLEMENTED(KERNEL, FUNCNAME, TYPE)       \
-  if (!KERNEL) {                                        \
-    std::stringstream ss;                               \
-    ss << FUNCNAME                                      \
-       << " not implemented for " << type->ToString();  \
-    return Status::NotImplemented(ss.str());            \
+#define CHECK_IMPLEMENTED(KERNEL, FUNCNAME, TYPE)                  \
+  if (!KERNEL) {                                                   \
+    std::stringstream ss;                                          \
+    ss << FUNCNAME << " not implemented for " << type->ToString(); \
+    return Status::NotImplemented(ss.str());                       \
   }
 
 Status NewHashTable(int64_t size, MemoryPool* pool, std::shared_ptr<Buffer>* out) {
@@ -88,13 +87,15 @@ class HashException : public std::exception {
 
 const char* HashException::what() const throw() { return msg_.c_str(); }
 
-#define HASH_THROW_NOT_OK(EXPR)                     \
-  do {                                              \
-    Status _s = (EXPR);                             \
-    if (ARROW_PREDICT_FALSE(!_s.ok())) {            \
-      throw HashException(_s.message(), _s.code()); \
-    }                                               \
-  } while (false)
+// TODO(wesm): we do not need this macro yet
+
+// #define HASH_THROW_NOT_OK(EXPR)                     \
+//   do {                                              \
+//     Status _s = (EXPR);                             \
+//     if (ARROW_PREDICT_FALSE(!_s.ok())) {            \
+//       throw HashException(_s.message(), _s.code()); \
+//     }                                               \
+//   } while (false)
 
 class HashTable {
  public:
@@ -391,29 +392,25 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
 
   Status Reserve(const int64_t length) { return indices_builder_.Reserve(length); }
 
-  void ObserveNull() {
-    HASH_THROW_NOT_OK(indices_builder_.AppendNull());
-  }
+  void ObserveNull() { indices_builder_.UnsafeAppendToBitmap(false); }
 
-  void ObserveFound(const hash_slot_t slot) {
-    HASH_THROW_NOT_OK(indices_builder_.Append(slot));
-  }
+  void ObserveFound(const hash_slot_t slot) { indices_builder_.UnsafeAppend(slot); }
 
-  void ObserveNotFound(const hash_slot_t slot) {
-    return ObserveFound(slot);
-  }
+  void ObserveNotFound(const hash_slot_t slot) { return ObserveFound(slot); }
 
   Status DoubleSize() { return Base::DoubleTableSize(); }
 
   Status Flush(std::vector<Datum>* out) override {
-    // TODO
+    std::shared_ptr<ArrayData> result;
+    RETURN_NOT_OK(indices_builder_.FinishInternal(&result));
+    out->push_back(Datum(result));
     return Status::OK();
   }
 
   using Base::Append;
 
  private:
-  AdaptiveIntBuilder indices_builder_;
+  Int32Builder indices_builder_;
 };
 
 }  // namespace

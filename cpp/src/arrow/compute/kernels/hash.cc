@@ -147,23 +147,6 @@ Status HashTable::Init(int64_t elements) {
 template <typename Type, typename Action, typename Enable = void>
 class HashTableKernel : public HashTable {};
 
-// template <>
-// int UniqueBuilder<FixedSizeBinaryType>::HashValue(const Scalar& value) {
-//   return HashUtil::Hash(value, byte_width_, 0);
-// }
-
-// Linear probing
-#define HASH_PROBE(TABLE, TABLE_SIZE, DIFFERENT)               \
-  do {                                                         \
-    while (kHashSlotEmpty != slot && DIFFERENT(slot, value)) { \
-      ++j;                                                     \
-      if (j == TABLE_SIZE) {                                   \
-        j = 0;                                                 \
-      }                                                        \
-      slot = TABLE[j];                                         \
-    }                                                          \
-  } while (false)
-
 // Types of hash actions
 //
 // unique: append to dictionary when not found, no-op with slot
@@ -175,33 +158,8 @@ class HashTableKernel : public HashTable {};
 template <typename Type, typename Enable = void>
 class HashDictionary {};
 
-template <typename Type>
-struct HashDictionary<Type, enable_if_primitive_ctype<Type>> {
-  using T = typename Type::c_type;
-
-  HashDictionary() : size(0), capacity(0) {}
-
-  Status Init(MemoryPool* pool) {
-    this->buffer = std::make_shared<PoolBuffer>(pool);
-    this->size = 0;
-    return Resize(kInitialHashTableSize);
-  }
-
-  Status DoubleSize() { return Resize(this->size * 2); }
-
-  Status Resize(const int64_t elements) {
-    RETURN_NOT_OK(this->buffer->Resize(elements * sizeof(T)));
-
-    this->capacity = elements;
-    this->values = reinterpret_cast<T*>(this->buffer->mutable_data());
-    return Status::OK();
-  }
-
-  std::shared_ptr<ResizableBuffer> buffer;
-  T* values;
-  int64_t size;
-  int64_t capacity;
-};
+// ----------------------------------------------------------------------
+// Hash table pass for nulls
 
 template <typename Type, typename Action>
 class HashTableKernel<Type, Action, enable_if_null<Type>> : public HashTable {
@@ -233,13 +191,45 @@ class HashTableKernel<Type, Action, enable_if_null<Type>> : public HashTable {
   }
 };
 
+// ----------------------------------------------------------------------
+// Hash table pass for primitive types
+
+template <typename Type>
+struct HashDictionary<Type, enable_if_primitive_ctype<Type>> {
+  using T = typename Type::c_type;
+
+  HashDictionary(MemoryPool* pool) : pool_(pool), size(0), capacity(0) {}
+
+  Status Init(MemoryPool* pool) {
+    this->buffer = std::make_shared<PoolBuffer>(pool);
+    this->size = 0;
+    return Resize(kInitialHashTableSize);
+  }
+
+  Status DoubleSize() { return Resize(this->size * 2); }
+
+  Status Resize(const int64_t elements) {
+    RETURN_NOT_OK(this->buffer->Resize(elements * sizeof(T)));
+
+    this->capacity = elements;
+    this->values = reinterpret_cast<T*>(this->buffer->mutable_data());
+    return Status::OK();
+  }
+
+  std::shared_ptr<ResizableBuffer> buffer;
+  T* values;
+  int64_t size;
+  int64_t capacity;
+};
+
 template <typename Type, typename Action>
 class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public HashTable {
  public:
   using T = typename Type::c_type;
-  using ArrayType = typename TypeTraits<Type>::ArrayType;
 
-  using HashTable::HashTable;
+  HashTableKernel(const std::shared_ptr<DataType>& type, MemoryPool* pool)
+    : HashTable(type, pool),
+      dict_(pool) {}
 
   Status Init() {
     RETURN_NOT_OK(dict_.Init(pool_));
@@ -256,10 +246,153 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
 
     RETURN_NOT_OK(action->Reserve(arr.length));
 
+#define HASH_INNER_LOOP()                                               \
+    int64_t j = HashValue(value) & mod_bitmask_;                        \
+    hash_slot_t slot = hash_slots_[j];                                  \
+                                                                        \
+    // Find an empty slot                                               \
+    while (kHashSlotEmpty != slot && dict_.values[slot] != value) {     \
+      ++j;                                                              \
+      if (ARROW_PREDICT_FALSE(j == hash_table_size_)) {                 \
+        j = 0;                                                          \
+      }                                                                 \
+      slot = hash_slots_[j];                                            \
+    }                                                                   \
+                                                                        \
+    if (slot == kHashSlotEmpty) {                                       \
+      if (!Action::allow_expand) {                                      \
+        throw HashException("Encountered new dictionary value");        \
+      }                                                                 \
+                                                                        \
+      // Not in the hash table, so we insert it now                     \
+      slot = static_cast<hash_slot_t>(dict_.size);                      \
+      hash_slots_[j] = slot;                                            \
+      dict_.values[dict_.size++] = value;                               \
+                                                                        \
+      action->ObserveNotFound(slot);                                    \
+                                                                        \
+      if (ARROW_PREDICT_FALSE(dict_.size > hash_table_size_ * kMaxHashTableLoad)) { \
+        RETURN_NOT_OK(action->DoubleSize());                            \
+      }                                                                 \
+    } else {                                                            \
+      action->ObserveFound(slot);                                       \
+    }
+
+    if (arr.null_count != 0) {
+      internal::BitmapReader valid_reader(arr.buffers[0]->data(), arr.offset,
+                                          arr.length);
+      for (int64_t i = 0; i < arr.length; ++i) {
+        const T value = values[i];
+        const bool is_null = valid_reader.IsNotSet();
+        valid_reader.Next();
+
+        if (is_null) {
+          action->ObserveNull();
+          continue;
+        }
+
+        HASH_INNER_LOOP();
+      }
+    } else {
+      for (int64_t i = 0; i < arr.length; ++i) {
+        HASH_INNER_LOOP();
+      }
+    }
+
+#undef HASH_INNER_LOOP
+
+    return Status::OK();
+  }
+
+  Status GetDictionary(std::shared_ptr<ArrayData>* out) override {
+    // TODO(wesm): handle null being in the dictionary
+    auto dict_data = dict_.buffer;
+    RETURN_NOT_OK(dict_data->Resize(dict_.size * sizeof(T), false));
+
+    BufferVector buffers = {nullptr, dict_data};
+    *out = std::make_shared<ArrayData>(type_, dict_.size, std::move(buffers), 0);
+    return Status::OK();
+  }
+
+ protected:
+  int64_t HashValue(const T& value) const {
+    // TODO(wesm): Use faster hash function for C types
+    return HashUtil::Hash(&value, sizeof(T), 0);
+  }
+
+  Status DoubleTableSize() {
+    int64_t new_size = hash_table_size_ * 2;
+
+    std::shared_ptr<Buffer> new_hash_table;
+    RETURN_NOT_OK(NewHashTable(new_size, pool_, &new_hash_table));
+    int32_t* new_hash_slots =
+        reinterpret_cast<hash_slot_t*>(new_hash_table->mutable_data());
+    int64_t new_mod_bitmask = new_size - 1;
+
+    for (int i = 0; i < hash_table_size_; ++i) {
+      hash_slot_t index = hash_slots_[i];
+
+      if (index == kHashSlotEmpty) {
+        continue;
+      }
+
+      // Compute the hash value mod the new table size to start looking for an
+      // empty slot
+      const T value = dict_.values[index];
+
+      // Find empty slot in the new hash table
+      int64_t j = HashValue(value) & new_mod_bitmask;
+      while (kHashSlotEmpty != new_hash_slots[j]) {
+        ++j;
+        if (ARROW_PREDICT_FALSE(j == hash_table_size_)) {
+          j = 0;
+        }
+      }
+
+      // Copy the old slot index to the new hash table
+      new_hash_slots[j] = index;
+    }
+
+    hash_table_ = new_hash_table;
+    hash_slots_ = reinterpret_cast<hash_slot_t*>(hash_table_->mutable_data());
+    hash_table_size_ = new_size;
+    mod_bitmask_ = new_size - 1;
+
+    return dict_.Resize(new_size);
+  }
+
+  HashDictionary<Type> dict_;
+};
+
+// ----------------------------------------------------------------------
+// Hash table pass for variable-length binary types
+
+template <typename Type, typename Action>
+class HashTableKernel<Type, Action, enable_if_binary<Type>> : public HashTable {
+ public:
+  HashTableKernel(const std::shared_ptr<DataType>& type, MemoryPool* pool)
+    : HashTable(type, pool),
+      offsets_builder_(pool)
+      value_data_builder_(pool) {}
+
+  Status Init() {
+    return HashTable::Init(kInitialHashTableSize);
+  }
+
+  Status Append(const ArrayData& arr) override {
+    if (!initialized_) {
+      RETURN_NOT_OK(Init());
+    }
+
     internal::BitmapReader valid_reader(arr.buffers[0]->data(), arr.offset, arr.length);
 
+    const int32_t* offsets = GetValues<int32_t>(arr, 1);
+    const uint8_t* data = GetValues<uint8_t>(arr, 2);
+
+    auto action = static_cast<Action*>(this);
+    RETURN_NOT_OK(action->Reserve(arr.length));
+
     for (int64_t i = 0; i < arr.length; ++i) {
-      const T value = values[i];
       const bool is_null = valid_reader.IsNotSet();
       valid_reader.Next();
 
@@ -268,11 +401,26 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
         continue;
       }
 
-      int64_t j = HashValue(value) & mod_bitmask_;
+      const int32_t position = *offsets++;
+      const int32_t length = *offsets - position;
+      const uint8_t* value = data + position;
+
+      int64_t j = HashValue(value, length) & mod_bitmask_;
       hash_slot_t slot = hash_slots_[j];
 
       // Find an empty slot
-      HASH_PROBE(hash_slots_, hash_table_size_, SlotDifferent);
+      const int32_t* dict_offsets = dict_offsets_.data();
+      const int32_t slot_length = dict_offsets[slot + 1] - dict_offsets[slot];
+      const uint8_t* dict_data = dict_data_.data();
+      while (kHashSlotEmpty != slot &&
+             !(slot_length == length &&
+               0 == memcmp(value,  + offsets_data[slot], length))) {
+        ++j;
+        if (ARROW_PREDICT_FALSE(j == hash_table_size_)) {
+          j = 0;
+        }
+        slot = hash_slots_[j];
+      }
 
       if (slot == kHashSlotEmpty) {
         if (!Action::allow_expand) {
@@ -280,7 +428,7 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
         }
 
         // Not in the hash table, so we insert it now
-        slot = static_cast<hash_slot_t>(dict_.size);
+        slot = static_cast<hash_slot_t>(offsets_builder_.length());
         hash_slots_[j] = slot;
         dict_.values[dict_.size++] = value;
 
@@ -308,13 +456,8 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
   }
 
  protected:
-  bool SlotDifferent(const hash_slot_t slot, const T& value) const {
-    return dict_.values[slot] != value;
-  }
-
-  int64_t HashValue(const T& value) const {
-    // TODO(wesm): Use faster hash function for C types
-    return HashUtil::Hash(&value, sizeof(T), 0);
+  int64_t HashValue(const uint8_t* data, int32_t length) const {
+    return HashUtil::Hash(data, length, 0);
   }
 
   Status DoubleTableSize() {
@@ -326,22 +469,29 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
         reinterpret_cast<hash_slot_t*>(new_hash_table->mutable_data());
     int64_t new_mod_bitmask = new_size - 1;
 
+    const int32_t* dict_offsets = dict_offsets_.data();
+    const uint8_t* dict_data = dict_data_.data();
+
     for (int i = 0; i < hash_table_size_; ++i) {
       hash_slot_t index = hash_slots_[i];
 
-      if (index == kHashSlotEmpty) {
+      if (slot == kHashSlotEmpty) {
         continue;
       }
 
       // Compute the hash value mod the new table size to start looking for an
       // empty slot
-      const T value = dict_.values[index];
+      const int32_t length = dict_offsets[index + 1] - dict_offsets[index];
+      const uint8_t* value = dict_data + dict_offsets[index];
 
       // Find an empty slot in the new hash table
-      int64_t j = HashValue(value) & new_mod_bitmask;
-      hash_slot_t slot = new_hash_slots[j];
-
-      HASH_PROBE(new_hash_slots, new_size, SlotDifferent);
+      int64_t j = HashValue(value, length) & new_mod_bitmask;
+      while (kHashSlotEmpty != new_hash_slots[j]) {
+        ++j;
+        if (ARROW_PREDICT_FALSE(j == hash_table_size_)) {
+          j = 0;
+        }
+      }
 
       // Copy the old slot index to the new hash table
       new_hash_slots[j] = index;
@@ -352,11 +502,16 @@ class HashTableKernel<Type, Action, enable_if_primitive_ctype<Type>> : public Ha
     hash_table_size_ = new_size;
     mod_bitmask_ = new_size - 1;
 
-    return dict_.Resize(new_size);
+    return Status::OK();
   }
 
-  HashDictionary<Type> dict_;
+  TypedBufferBuilder<int32_t> dict_offsets_;
+  TypedBufferBuilder<uint8_t> dict_data_;
+  int32_t dict_size_;
 };
+
+// ----------------------------------------------------------------------
+// Unique implementation
 
 template <typename Type>
 class UniqueImpl : public HashTableKernel<Type, UniqueImpl<Type>> {
@@ -380,6 +535,9 @@ class UniqueImpl : public HashTableKernel<Type, UniqueImpl<Type>> {
     return Status::OK();
   }
 };
+
+// ----------------------------------------------------------------------
+// Dictionary encode implementation
 
 template <typename Type>
 class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
@@ -413,7 +571,8 @@ class DictEncodeImpl : public HashTableKernel<Type, DictEncodeImpl<Type>> {
   Int32Builder indices_builder_;
 };
 
-}  // namespace
+// ----------------------------------------------------------------------
+// Kernel wrapper for generic hash table kernels
 
 class HashKernelImpl : public HashKernel {
  public:
@@ -446,6 +605,8 @@ class HashKernelImpl : public HashKernel {
   std::mutex lock_;
   std::unique_ptr<HashTable> hasher_;
 };
+
+}  // namespace
 
 Status GetUniqueKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& type,
                        std::unique_ptr<HashKernel>* out) {

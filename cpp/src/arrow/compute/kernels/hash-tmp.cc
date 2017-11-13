@@ -169,18 +169,6 @@ class ARROW_EXPORT StringDictionaryBuilder : public DictionaryBuilder<StringType
 // ----------------------------------------------------------------------
 // UniqueBuilder
 
-template <typename T>
-UniqueBuilder<T>::UniqueBuilder(const std::shared_ptr<DataType>& type, MemoryPool* pool)
-    : ArrayBuilder(type, pool),
-      hash_table_(new PoolBuffer(pool)),
-      hash_slots_(nullptr),
-      dict_builder_(type, pool),
-      byte_width_(-1) {
-  if (!::arrow::CpuInfo::initialized()) {
-    ::arrow::CpuInfo::Init();
-  }
-}
-
 template <>
 UniqueBuilder<FixedSizeBinaryType>::UniqueBuilder(const std::shared_ptr<DataType>& type,
                                                   MemoryPool* pool)
@@ -192,97 +180,6 @@ UniqueBuilder<FixedSizeBinaryType>::UniqueBuilder(const std::shared_ptr<DataType
   if (!::arrow::CpuInfo::initialized()) {
     ::arrow::CpuInfo::Init();
   }
-}
-
-template <typename T>
-Status UniqueBuilder<T>::Init(int64_t elements) {
-  RETURN_NOT_OK(ArrayBuilder::Init(elements));
-
-  // Fill the initial hash table
-  RETURN_NOT_OK(hash_table_->Resize(sizeof(hash_slot_t) * kInitialHashTableSize));
-  hash_slots_ = reinterpret_cast<int32_t*>(hash_table_->mutable_data());
-  std::fill(hash_slots_, hash_slots_ + kInitialHashTableSize, kHashSlotEmpty);
-  hash_table_size_ = kInitialHashTableSize;
-  mod_bitmask_ = kInitialHashTableSize - 1;
-
-  return Status::OK();
-}
-
-template <typename T>
-Status UniqueBuilder<T>::Resize(int64_t capacity) {
-  if (capacity < kMinBuilderCapacity) {
-    capacity = kMinBuilderCapacity;
-  }
-
-  if (capacity_ == 0) {
-    return Init(capacity);
-  } else {
-    return ArrayBuilder::Resize(capacity);
-  }
-}
-
-template <typename T>
-Status UniqueBuilder<T>::Append(const Scalar& value) {
-  int32_t index;
-  return Append(value, &index);
-}
-
-template <typename T>
-Status UniqueBuilder<T>::Append(const Scalar& value, int32_t* index) {
-  RETURN_NOT_OK(Reserve(1));
-  Based on DictEncoder<DType>::Put int j = HashValue(value) & mod_bitmask_;
-  hash_slot_t slot = hash_slots_[j];
-
-  // Find an empty slot
-  while (kHashSlotEmpty != slot && SlotDifferent(slot, value)) {
-    // Linear probing
-    ++j;
-    if (j == hash_table_size_) {
-      j = 0;
-    }
-    slot = hash_slots_[j];
-  }
-
-  if (slot == kHashSlotEmpty) {
-    // Not in the hash table, so we insert it now
-    slot = static_cast<hash_slot_t>(dict_builder_.length());
-    hash_slots_[j] = slot;
-    RETURN_NOT_OK(AppendDictionary(value));
-
-    if (ARROW_PREDICT_FALSE(static_cast<int32_t>(dict_builder_.length()) >
-                            hash_table_size_ * kMaxHashTableLoad)) {
-      RETURN_NOT_OK(DoubleTableSize());
-    }
-  }
-
-  *index = slot;
-  return Status::OK();
-}
-
-template <typename T>
-Status UniqueBuilder<T>::AppendArray(const Array& array) {
-  const auto& numeric_array = static_cast<const NumericArray<T>&>(array);
-  for (int64_t i = 0; i < array.length(); i++) {
-    if (!array.IsNull(i)) {
-      RETURN_NOT_OK(Append(numeric_array.Value(i)));
-    }
-  }
-  return Status::OK();
-}
-
-template <>
-Status UniqueBuilder<FixedSizeBinaryType>::AppendArray(const Array& array) {
-  if (!type_->Equals(*array.type())) {
-    return Status::Invalid("Cannot append FixedSizeBinary array with non-matching type");
-  }
-
-  const auto& numeric_array = static_cast<const FixedSizeBinaryArray&>(array);
-  for (int64_t i = 0; i < array.length(); i++) {
-    if (!array.IsNull(i)) {
-      RETURN_NOT_OK(Append(numeric_array.Value(i)));
-    }
-  }
-  return Status::OK();
 }
 
 template <typename T>

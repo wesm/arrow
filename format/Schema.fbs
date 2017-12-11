@@ -20,16 +20,16 @@
 namespace org.apache.arrow.flatbuf;
 
 enum MetadataVersion:short {
-  /// 0.1.0
+  // 0.1.0
   V1,
 
-  /// 0.2.0
+  // 0.2.0
   V2,
 
-  /// 0.3.0 -> 0.7.1
+  // 0.3.0 to 0.7.1
   V3,
 
-  /// >= 0.8.0
+  // 0.8.0 and higher
   V4
 }
 

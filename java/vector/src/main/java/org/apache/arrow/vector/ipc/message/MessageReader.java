@@ -40,7 +40,7 @@ public interface MessageReader {
 
   /**
    * When a message is followed by a body of data, read that data into an ArrowBuf. This should
-   * only be called when a Message has a body length > 0.
+   * only be called when a Message has a body with non-zero length.
    *
    * @param message Read message that is followed by a body of data
    * @param allocator BufferAllocator to allocate memory for body data

@@ -252,10 +252,33 @@ Logging IWYU to /tmp/arrow-cpp-iwyu.gT7XXV
 ...
 ```
 
+## Code Formatting and Linting
+
+We follow the Google C++ coding style, which is maintained using
+`clang-format`. Since `clang-format` has minor changes between LLVM versions,
+we use a fixed version (currently LLVM 4.0) to maintain the codebase. Specific
+LLVM releases can be obtained from the project's [download page][5].
+
+You can run `clang-format` on the codebase by running
+
+```shell
+make format
+```
+
+We use Google's `cpplint` tool to check for some other common style
+issues. This is a Python-based tool; we include a copy of cpplint in the git
+repository, but if you are using Python 3, you will need to install cpplint
+separately:
+
+```shell
+pip install cpplint
+```
+
 ## Continuous Integration
 
-Pull requests are run through travis-ci for continuous integration.  You can avoid
-build failures by running the following checks before submitting your pull request:
+Pull requests are run through Travis CI for continuous integration. You can
+avoid build failures by running the following checks before submitting your
+pull request:
 
     make unittest
     make lint
@@ -270,18 +293,8 @@ compiler. Please run CMake with
 
 to avoid failures due to compiler warnings.
 
-Note that the clang-tidy target may take a while to run.  You might consider
-running clang-tidy separately on the files you have added/changed before
-invoking the make target to reduce iteration time.  Also, it might generate warnings
-that aren't valid.  To avoid these you can add a line comment `// NOLINT`. If
-NOLINT doesn't suppress the warnings, you add the file in question to
-the .clang-tidy-ignore file.  This will allow `make check-clang-tidy` to pass in
-travis-CI (but still surface the potential warnings in `make clang-tidy`). Ideally,
-both of these options would be used rarely. Current known uses-cases when they are required:
-
-*  Parameterized tests in google test.
-
 [1]: https://brew.sh/
 [2]: https://github.com/apache/arrow/blob/master/cpp/apidoc/Windows.md
 [3]: https://google.github.io/styleguide/cppguide.html
 [4]: https://github.com/include-what-you-use/include-what-you-use
+[5]: http://releases.llvm.org/download.html

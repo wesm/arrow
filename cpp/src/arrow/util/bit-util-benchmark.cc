@@ -46,11 +46,78 @@ static void BM_CopyBitmap(benchmark::State& state) {  // NOLINT non-const refere
   state.SetBytesProcessed(state.iterations() * kBufferSize * sizeof(int8_t));
 }
 
+static int64_t CountBitsNaive(const uint8_t* data, int64_t nbytes) {
+  int64_t result = 0;
+  for (int64_t i = 0; i < nbytes; ++i) {
+    if (BitUtil::GetBit(data, i)) {
+      ++result;
+    }
+  }
+  return result;
+}
+
+static int64_t CountBitsWithReader(const uint8_t* data, int64_t nbytes) {
+  internal::BitmapReader reader(data, 0, nbytes * 8);
+
+  int64_t result = 0;
+  for (int64_t i = 0; i < nbytes; ++i) {
+    if (reader.IsSet()) {
+      ++result;
+    }
+    reader.Next();
+  }
+  return result;
+}
+
+static void BM_ReadBitmapNaive(benchmark::State& state) {  // NOLINT non-const reference
+  const int kNumberBytes = state.range(0);
+
+  std::shared_ptr<Buffer> buffer;
+  ASSERT_OK(AllocateBuffer(default_memory_pool(), kNumberBytes, &buffer));
+  test::random_bytes(kNumberBytes, 0, buffer->mutable_data());
+
+  const int64_t expected = CountBitsNaive(buffer->data(), kNumberBytes);
+  while (state.KeepRunning()) {
+    const int64_t result = CountBitsNaive(buffer->data(), kNumberBytes);
+    if (result != expected) {
+      exit(1);
+    }
+  }
+  state.SetBytesProcessed(state.iterations() * kNumberBytes);
+}
+
+static void BM_ReadBitmap(benchmark::State& state) {  // NOLINT non-const reference
+  const int kNumberBytes = state.range(0);
+
+  std::shared_ptr<Buffer> buffer;
+  ASSERT_OK(AllocateBuffer(default_memory_pool(), kNumberBytes, &buffer));
+  test::random_bytes(kNumberBytes, 0, buffer->mutable_data());
+
+  const int64_t expected = CountBitsNaive(buffer->data(), kNumberBytes);
+  while (state.KeepRunning()) {
+    const int64_t result = CountBitsWithReader(buffer->data(), kNumberBytes);
+    if (result != expected) {
+      exit(1);
+    }
+  }
+  state.SetBytesProcessed(state.iterations() * kNumberBytes);
+}
+
 BENCHMARK(BM_CopyBitmap)
     ->Args({100000, 0})
     ->Args({1000000, 0})
     ->Args({100000, 4})
     ->Args({1000000, 4})
+    ->MinTime(1.0)
+    ->Unit(benchmark::kMicrosecond);
+
+BENCHMARK(BM_ReadBitmapNaive)
+    ->Args({10000000, 0})
+    ->MinTime(1.0)
+    ->Unit(benchmark::kMicrosecond);
+
+BENCHMARK(BM_ReadBitmap)
+    ->Args({10000000, 0})
     ->MinTime(1.0)
     ->Unit(benchmark::kMicrosecond);
 

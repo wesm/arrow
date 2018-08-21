@@ -63,7 +63,7 @@ set(HIVESERVER2_THRIFT_SRC
 )
 
 set_source_files_properties(${HIVESERVER2_THRIFT_SRC} PROPERTIES
-  COMPILE_FLAGS "-Wno-unused-variable -Wno-shadow-field"
+  COMPILE_FLAGS "-Wno-documentation -Wno-unused-variable -Wno-shadow-field"
   GENERATED TRUE)
 
 # keep everything in one library, the object files reference

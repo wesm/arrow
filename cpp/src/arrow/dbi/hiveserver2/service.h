@@ -65,6 +65,18 @@ enum class ProtocolVersion {
   PROTOCOL_V7,  // supported
 };
 
+struct HS2ServiceOptions {
+  HS2ServiceOptions(int conn_timeout_arg=0, bool use_ssl_arg=false)
+      : conn_timeout(conn_timeout_arg),
+        use_ssl(use_ssl_arg) {}
+
+  // Connection timeout in milliseconds, 0 to block / no timeout
+  int conn_timeout;
+
+  // Use SSL with Thrift socket
+  bool use_ssl;
+};
+
 // Manages a connection to a HiveServer2 server. Primarily used to create
 // new sessions via OpenSession.
 //

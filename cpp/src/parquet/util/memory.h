@@ -27,8 +27,6 @@
 #include <vector>
 
 #include "arrow/buffer.h"
-#include "arrow/io/interfaces.h"
-#include "arrow/io/memory.h"
 #include "arrow/memory_pool.h"
 
 #include "parquet/exception.h"
@@ -38,11 +36,16 @@
 
 namespace arrow {
 
+class Buffer;
 class Codec;
+class ResizableBuffer;
 
 }  // namespace arrow
 
 namespace parquet {
+
+using OutputStream = arrow::io::OutputStream;
+using RandomAccessFile = arrow::io::RandomAccessFile;
 
 PARQUET_EXPORT
 std::unique_ptr<::arrow::Codec> GetCodecFromArrow(Compression::type codec);
@@ -218,150 +221,6 @@ class PARQUET_EXPORT ChunkedAllocator {
   uint8_t* Allocate(int size);
 };
 
-// File input and output interfaces that translate arrow::Status to exceptions
-
-class PARQUET_EXPORT FileInterface {
- public:
-  virtual ~FileInterface() = default;
-
-  // Close the file
-  virtual void Close() = 0;
-
-  // Return the current position in the file relative to the start
-  virtual int64_t Tell() = 0;
-};
-
-/// It is the responsibility of implementations to mind threadsafety of shared
-/// resources
-class PARQUET_EXPORT RandomAccessSource : virtual public FileInterface {
- public:
-  virtual ~RandomAccessSource() = default;
-
-  virtual int64_t Size() const = 0;
-
-  // Returns bytes read
-  virtual int64_t Read(int64_t nbytes, uint8_t* out) = 0;
-
-  virtual std::shared_ptr<Buffer> Read(int64_t nbytes) = 0;
-
-  virtual std::shared_ptr<Buffer> ReadAt(int64_t position, int64_t nbytes) = 0;
-
-  /// Returns bytes read
-  virtual int64_t ReadAt(int64_t position, int64_t nbytes, uint8_t* out) = 0;
-};
-
-class PARQUET_EXPORT OutputStream : virtual public FileInterface {
- public:
-  virtual ~OutputStream() = default;
-
-  // Copy bytes into the output stream
-  virtual void Write(const uint8_t* data, int64_t length) = 0;
-};
-
-class PARQUET_EXPORT ArrowFileMethods : virtual public FileInterface {
- public:
-  // No-op. Closing the file is the responsibility of the owner of the handle
-  void Close() override;
-
-  int64_t Tell() override;
-
- protected:
-  virtual ::arrow::io::FileInterface* file_interface() = 0;
-};
-
-// Suppress C4250 warning caused by diamond inheritance
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4250)
-#endif
-
-/// This interface depends on the threadsafety of the underlying Arrow file interface
-class PARQUET_EXPORT ArrowInputFile : public ArrowFileMethods, public RandomAccessSource {
- public:
-  explicit ArrowInputFile(
-      const std::shared_ptr<::arrow::io::ReadableFileInterface>& file);
-
-  int64_t Size() const override;
-
-  // Returns bytes read
-  int64_t Read(int64_t nbytes, uint8_t* out) override;
-
-  std::shared_ptr<Buffer> Read(int64_t nbytes) override;
-
-  std::shared_ptr<Buffer> ReadAt(int64_t position, int64_t nbytes) override;
-
-  /// Returns bytes read
-  int64_t ReadAt(int64_t position, int64_t nbytes, uint8_t* out) override;
-
-  std::shared_ptr<::arrow::io::ReadableFileInterface> file() const { return file_; }
-
-  // Diamond inheritance
-  using ArrowFileMethods::Close;
-  using ArrowFileMethods::Tell;
-
- private:
-  ::arrow::io::FileInterface* file_interface() override;
-  std::shared_ptr<::arrow::io::ReadableFileInterface> file_;
-};
-
-class PARQUET_EXPORT ArrowOutputStream : public ArrowFileMethods, public OutputStream {
- public:
-  explicit ArrowOutputStream(const std::shared_ptr<::arrow::io::OutputStream> file);
-
-  // Copy bytes into the output stream
-  void Write(const uint8_t* data, int64_t length) override;
-
-  std::shared_ptr<::arrow::io::OutputStream> file() { return file_; }
-
-  // Diamond inheritance
-  using ArrowFileMethods::Close;
-  using ArrowFileMethods::Tell;
-
- private:
-  ::arrow::io::FileInterface* file_interface() override;
-  std::shared_ptr<::arrow::io::OutputStream> file_;
-};
-
-// Pop C4250 pragma
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
-
-class PARQUET_EXPORT InMemoryOutputStream : public OutputStream {
- public:
-  explicit InMemoryOutputStream(
-      ::arrow::MemoryPool* pool = ::arrow::default_memory_pool(),
-      int64_t initial_capacity = kInMemoryDefaultCapacity);
-
-  virtual ~InMemoryOutputStream();
-
-  // Close is currently a no-op with the in-memory stream
-  virtual void Close() {}
-
-  virtual int64_t Tell();
-
-  virtual void Write(const uint8_t* data, int64_t length);
-
-  // Clears the stream
-  void Clear() { size_ = 0; }
-
-  // Get pointer to the underlying buffer
-  const Buffer& GetBufferRef() const { return *buffer_; }
-
-  // Return complete stream as Buffer
-  std::shared_ptr<Buffer> GetBuffer();
-
- private:
-  // Mutable pointer to the current write position in the stream
-  uint8_t* Head();
-
-  std::shared_ptr<ResizableBuffer> buffer_;
-  int64_t size_;
-  int64_t capacity_;
-
-  PARQUET_DISALLOW_COPY_AND_ASSIGN(InMemoryOutputStream);
-};
-
 // ----------------------------------------------------------------------
 // Streaming input interfaces
 
@@ -394,7 +253,7 @@ class PARQUET_EXPORT InputStream {
 // Implementation of an InputStream when all the bytes are in memory.
 class PARQUET_EXPORT InMemoryInputStream : public InputStream {
  public:
-  InMemoryInputStream(RandomAccessSource* source, int64_t start, int64_t end);
+  InMemoryInputStream(RandomAccessFile* source, int64_t start, int64_t end);
   explicit InMemoryInputStream(const std::shared_ptr<Buffer>& buffer);
   virtual const uint8_t* Peek(int64_t num_to_peek, int64_t* num_bytes);
   virtual const uint8_t* Read(int64_t num_to_read, int64_t* num_bytes);
@@ -411,7 +270,7 @@ class PARQUET_EXPORT InMemoryInputStream : public InputStream {
 class PARQUET_EXPORT BufferedInputStream : public InputStream {
  public:
   BufferedInputStream(::arrow::MemoryPool* pool, int64_t buffer_size,
-                      RandomAccessSource* source, int64_t start, int64_t end);
+                      RandomAccessFile* source, int64_t start, int64_t end);
   virtual const uint8_t* Peek(int64_t num_to_peek, int64_t* num_bytes);
   virtual const uint8_t* Read(int64_t num_to_read, int64_t* num_bytes);
 
@@ -419,7 +278,7 @@ class PARQUET_EXPORT BufferedInputStream : public InputStream {
 
  private:
   std::shared_ptr<ResizableBuffer> buffer_;
-  RandomAccessSource* source_;
+  RandomAccessFile* source_;
   int64_t stream_offset_;
   int64_t stream_end_;
   int64_t buffer_offset_;

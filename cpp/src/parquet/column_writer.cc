@@ -382,14 +382,14 @@ void ColumnWriter::InitSinks() {
 
 void ColumnWriter::WriteDefinitionLevels(int64_t num_levels, const int16_t* levels) {
   DCHECK(!closed_);
-  definition_levels_sink_->Write(reinterpret_cast<const uint8_t*>(levels),
-                                 sizeof(int16_t) * num_levels);
+  PARQUET_THROW_NOT_OK(
+      definition_levels_sink_->Write(levels, sizeof(int16_t) * num_levels));
 }
 
 void ColumnWriter::WriteRepetitionLevels(int64_t num_levels, const int16_t* levels) {
   DCHECK(!closed_);
-  repetition_levels_sink_->Write(reinterpret_cast<const uint8_t*>(levels),
-                                 sizeof(int16_t) * num_levels);
+  PARQUET_THROW_NOT_OK(
+      repetition_levels_sink_->Write(levels, sizeof(int16_t) * num_levels));
 }
 
 // return the size of the encoded buffer

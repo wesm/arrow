@@ -20,6 +20,8 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/io/interfaces.h"
+
 #include "parquet/column_writer.h"
 #include "parquet/schema-internal.h"
 #include "parquet/schema.h"
@@ -240,7 +242,8 @@ class RowGroupSerializer : public RowGroupWriter::Contents {
 class FileSerializer : public ParquetFileWriter::Contents {
  public:
   static std::unique_ptr<ParquetFileWriter::Contents> Open(
-      const std::shared_ptr<OutputStream>& sink, const std::shared_ptr<GroupNode>& schema,
+      const std::shared_ptr<OutputStream>& sink,
+      const std::shared_ptr<GroupNode>& schema,
       const std::shared_ptr<WriterProperties>& properties,
       const std::shared_ptr<const KeyValueMetadata>& key_value_metadata) {
     std::unique_ptr<ParquetFileWriter::Contents> result(
@@ -261,7 +264,7 @@ class FileSerializer : public ParquetFileWriter::Contents {
       auto metadata = metadata_->Finish();
       WriteFileMetaData(*metadata, sink_.get());
 
-      sink_->Close();
+      PARQUET_THROW_NOT_OK(sink_->Close());
       is_open_ = false;
     }
   }
@@ -325,7 +328,7 @@ class FileSerializer : public ParquetFileWriter::Contents {
 
   void StartFile() {
     // Parquet files always start with PAR1
-    sink_->Write(PARQUET_MAGIC, 4);
+    PARQUET_THROW_NOT_OK(sink_->Write(PARQUET_MAGIC, 4));
   }
 };
 
@@ -342,15 +345,6 @@ ParquetFileWriter::~ParquetFileWriter() {
 }
 
 std::unique_ptr<ParquetFileWriter> ParquetFileWriter::Open(
-    const std::shared_ptr<::arrow::io::OutputStream>& sink,
-    const std::shared_ptr<GroupNode>& schema,
-    const std::shared_ptr<WriterProperties>& properties,
-    const std::shared_ptr<const KeyValueMetadata>& key_value_metadata) {
-  return Open(std::make_shared<ArrowOutputStream>(sink), schema, properties,
-              key_value_metadata);
-}
-
-std::unique_ptr<ParquetFileWriter> ParquetFileWriter::Open(
     const std::shared_ptr<OutputStream>& sink,
     const std::shared_ptr<schema::GroupNode>& schema,
     const std::shared_ptr<WriterProperties>& properties,
@@ -363,14 +357,19 @@ std::unique_ptr<ParquetFileWriter> ParquetFileWriter::Open(
 
 void WriteFileMetaData(const FileMetaData& file_metadata, OutputStream* sink) {
   // Write MetaData
-  uint32_t metadata_len = static_cast<uint32_t>(sink->Tell());
+  int64_t position = 0;
+  PARQUET_THROW_NOT_OK(sink->Tell(&position));
+
+  uint32_t metadata_len = static_cast<uint32_t>(position);
 
   file_metadata.WriteTo(sink);
-  metadata_len = static_cast<uint32_t>(sink->Tell()) - metadata_len;
+
+  PARQUET_THROW_NOT_OK(sink->Tell(&position));
+  metadata_len = static_cast<uint32_t>(position) - metadata_len;
 
   // Write Footer
-  sink->Write(reinterpret_cast<uint8_t*>(&metadata_len), 4);
-  sink->Write(PARQUET_MAGIC, 4);
+  PARQUET_THROW_NOT_OK(sink->Write(&metadata_len, 4));
+  PARQUET_THROW_NOT_OK(sink->Write(PARQUET_MAGIC, 4));
 }
 
 const SchemaDescriptor* ParquetFileWriter::schema() const { return contents_->schema(); }

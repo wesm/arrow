@@ -347,69 +347,6 @@ bool ChunkedAllocator::CheckIntegrity(bool current_chunk_empty) {
 }
 
 // ----------------------------------------------------------------------
-// Arrow IO wrappers
-
-void ArrowFileMethods::Close() {
-  // Closing the file is the responsibility of the owner of the handle
-  return;
-}
-
-// Return the current position in the output stream relative to the start
-int64_t ArrowFileMethods::Tell() {
-  int64_t position = 0;
-  PARQUET_THROW_NOT_OK(file_interface()->Tell(&position));
-  return position;
-}
-
-ArrowInputFile::ArrowInputFile(
-    const std::shared_ptr<::arrow::io::ReadableFileInterface>& file)
-    : file_(file) {}
-
-::arrow::io::FileInterface* ArrowInputFile::file_interface() { return file_.get(); }
-
-int64_t ArrowInputFile::Size() const {
-  int64_t size;
-  PARQUET_THROW_NOT_OK(file_->GetSize(&size));
-  return size;
-}
-
-// Returns bytes read
-int64_t ArrowInputFile::Read(int64_t nbytes, uint8_t* out) {
-  int64_t bytes_read = 0;
-  PARQUET_THROW_NOT_OK(file_->Read(nbytes, &bytes_read, out));
-  return bytes_read;
-}
-
-std::shared_ptr<Buffer> ArrowInputFile::Read(int64_t nbytes) {
-  std::shared_ptr<Buffer> out;
-  PARQUET_THROW_NOT_OK(file_->Read(nbytes, &out));
-  return out;
-}
-
-std::shared_ptr<Buffer> ArrowInputFile::ReadAt(int64_t position, int64_t nbytes) {
-  std::shared_ptr<Buffer> out;
-  PARQUET_THROW_NOT_OK(file_->ReadAt(position, nbytes, &out));
-  return out;
-}
-
-int64_t ArrowInputFile::ReadAt(int64_t position, int64_t nbytes, uint8_t* out) {
-  int64_t bytes_read = 0;
-  PARQUET_THROW_NOT_OK(file_->ReadAt(position, nbytes, &bytes_read, out));
-  return bytes_read;
-}
-
-ArrowOutputStream::ArrowOutputStream(
-    const std::shared_ptr<::arrow::io::OutputStream> file)
-    : file_(file) {}
-
-::arrow::io::FileInterface* ArrowOutputStream::file_interface() { return file_.get(); }
-
-// Copy bytes into the output stream
-void ArrowOutputStream::Write(const uint8_t* data, int64_t length) {
-  PARQUET_THROW_NOT_OK(file_->Write(data, length));
-}
-
-// ----------------------------------------------------------------------
 // InMemoryInputStream
 
 InMemoryInputStream::InMemoryInputStream(const std::shared_ptr<Buffer>& buffer)
@@ -417,10 +354,10 @@ InMemoryInputStream::InMemoryInputStream(const std::shared_ptr<Buffer>& buffer)
   len_ = buffer_->size();
 }
 
-InMemoryInputStream::InMemoryInputStream(RandomAccessSource* source, int64_t start,
+InMemoryInputStream::InMemoryInputStream(RandomAccessFile* source, int64_t start,
                                          int64_t num_bytes)
     : offset_(0) {
-  buffer_ = source->ReadAt(start, num_bytes);
+  PARQUET_THROW_NOT_OK(source->ReadAt(start, num_bytes, &buffer_));
   if (buffer_->size() < num_bytes) {
     throw ParquetException("Unable to read column chunk data");
   }
@@ -481,7 +418,7 @@ std::shared_ptr<Buffer> InMemoryOutputStream::GetBuffer() {
 // BufferedInputStream
 
 BufferedInputStream::BufferedInputStream(MemoryPool* pool, int64_t buffer_size,
-                                         RandomAccessSource* source, int64_t start,
+                                         RandomAccessFile* source, int64_t start,
                                          int64_t num_bytes)
     : source_(source), stream_offset_(start), stream_end_(start + num_bytes) {
   buffer_ = AllocateBuffer(pool, buffer_size);
@@ -501,8 +438,8 @@ const uint8_t* BufferedInputStream::Peek(int64_t num_to_peek, int64_t* num_bytes
   // Read more data when buffer has insufficient left or when resized
   if (*num_bytes > (buffer_size_ - buffer_offset_)) {
     buffer_size_ = std::min(buffer_size_, stream_end_ - stream_offset_);
-    int64_t bytes_read =
-        source_->ReadAt(stream_offset_, buffer_size_, buffer_->mutable_data());
+    PARQUET_THROW_NOT_OK(source_->ReadAt(stream_offset_, buffer_size_, &bytes_read,
+                                         buffer_->mutable_data()));
     if (bytes_read < *num_bytes) {
       throw ParquetException("Failed reading column data from source");
     }

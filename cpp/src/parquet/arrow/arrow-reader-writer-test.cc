@@ -1745,23 +1745,24 @@ TEST(TestArrowReadWrite, ListLargeRecords) {
   std::unique_ptr<ColumnReader> col_reader;
   ASSERT_OK(reader->GetColumn(0, &col_reader));
 
+  auto unchunked = table->column(0)->data()->chunk(0);
+
   std::vector<std::shared_ptr<Array>> pieces;
   for (int i = 0; i < num_rows; ++i) {
     std::shared_ptr<Array> piece;
     ASSERT_OK(col_reader->NextBatch(1, &piece));
     ASSERT_EQ(1, piece->length());
     pieces.push_back(piece);
+
+    auto unchunked_slice = unchunked->Slice(i, 1);
+    if (!piece->Equals(*unchunked_slice)) {
+      std::cout << i << std::endl;
+      ASSERT_OK(PrettyPrint(*piece, 0, &std::cout));
+      ASSERT_OK(PrettyPrint(*unchunked_slice, 0, &std::cout));
+      FAIL();
+    }
   }
   auto chunked = std::make_shared<::arrow::ChunkedArray>(pieces);
-
-  auto unchunked = table->column(0)->data();
-
-  for (int i = 0; i < num_rows; ++i) {
-    std::cout << i << std::endl;
-    auto slice0 = chunked->Slice(0, i);
-    auto slice1 = unchunked->Slice(0, i);
-    ASSERT_TRUE(slice0->Equals(*slice1));
-  }
 
   auto chunked_col =
       std::make_shared<::arrow::Column>(table->schema()->field(0), chunked);

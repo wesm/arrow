@@ -1712,6 +1712,7 @@ TEST(TestArrowReadWrite, ReadColumnSubset) {
 TEST(TestArrowReadWrite, ListLargeRecords) {
   // PARQUET-1308: This test passed on Linux when num_rows was smaller
   const int num_rows = 2000;
+  const int row_group_size = 100;
 
   std::shared_ptr<Array> list_array;
   std::shared_ptr<::DataType> list_type;
@@ -1723,8 +1724,8 @@ TEST(TestArrowReadWrite, ListLargeRecords) {
   std::shared_ptr<Table> table = Table::Make(schema, {list_array});
 
   std::shared_ptr<Buffer> buffer;
-  ASSERT_NO_FATAL_FAILURE(
-      WriteTableToBuffer(table, 100, default_arrow_writer_properties(), &buffer));
+  ASSERT_NO_FATAL_FAILURE(WriteTableToBuffer(table, row_group_size,
+                                             default_arrow_writer_properties(), &buffer));
 
   std::unique_ptr<FileReader> reader;
   ASSERT_OK_NO_THROW(OpenFile(std::make_shared<BufferReader>(buffer),
@@ -1752,6 +1753,15 @@ TEST(TestArrowReadWrite, ListLargeRecords) {
     pieces.push_back(piece);
   }
   auto chunked = std::make_shared<::arrow::ChunkedArray>(pieces);
+
+  auto unchunked = table->column(0)->data();
+
+  for (int i = 0; i < num_rows; ++i) {
+    std::cout << i << std::endl;
+    auto slice0 = chunked->Slice(0, i);
+    auto slice1 = unchunked->Slice(0, i);
+    ASSERT_TRUE(slice0->Equals(*slice1));
+  }
 
   auto chunked_col =
       std::make_shared<::arrow::Column>(table->schema()->field(0), chunked);

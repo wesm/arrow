@@ -27,6 +27,18 @@ set(PRECOMPILED_SRCS
     time.cc
     timestamp_arithmetic.cc)
 
+if (MSVC)
+  # clang pretends to be a particular version of MSVC. Version 1900 is
+  # Visual Studio 2015, and the standard library uses C++14 features,
+  # so we have to use that -std version to get the IR compilation to
+  # work
+  set(PLATFORM_CLANG_OPTIONS
+    -std=c++14 -fms-compatibility -fms-compatibility-version=19)
+else()
+  set(PLATFORM_CLANG_OPTIONS
+    -std=c++11)
+endif()
+
 # Create bitcode for each of the source files.
 foreach(SRC_FILE ${PRECOMPILED_SRCS})
   get_filename_component(SRC_BASE ${SRC_FILE} NAME_WE)
@@ -35,7 +47,8 @@ foreach(SRC_FILE ${PRECOMPILED_SRCS})
   add_custom_command(
     OUTPUT ${BC_FILE}
     COMMAND ${CLANG_EXECUTABLE}
-            -std=c++11 -emit-llvm -O2 -c ${ABSOLUTE_SRC} -o ${BC_FILE}
+            ${PLATFORM_CLANG_OPTIONS}
+            -emit-llvm -O2 -c ${ABSOLUTE_SRC} -o ${BC_FILE}
             -I${CMAKE_SOURCE_DIR}/src
     DEPENDS ${SRC_FILE})
   list(APPEND BC_FILES ${BC_FILE})

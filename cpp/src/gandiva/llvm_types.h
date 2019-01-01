@@ -21,9 +21,8 @@
 #include <map>
 #include <vector>
 
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/LLVMContext.h>
 #include "gandiva/arrow.h"
+#include "gandiva/llvm_includes.h"
 #include "gandiva/logging.h"
 
 namespace gandiva {

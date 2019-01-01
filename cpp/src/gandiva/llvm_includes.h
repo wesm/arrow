@@ -15,31 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef GANDIVA_LVALUE_H
-#define GANDIVA_LVALUE_H
+#pragma once
 
-#include "arrow/util/macros.h"
-#include "gandiva/llvm_includes.h"
+#if defined(_MSC_VER)
+#pragma warning( push )
+#pragma warning(disable : 4141)
+#pragma warning(disable : 4146)
+#pragma warning(disable : 4244)
+#pragma warning(disable : 4267)
+#pragma warning(disable : 4291)
+#pragma warning(disable : 4624)
+#endif
 
-namespace gandiva {
+#include <llvm/ExecutionEngine/ExecutionEngine.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 
-/// \brief Tracks validity/value builders in LLVM.
-class LValue {
- public:
-  explicit LValue(llvm::Value* data, llvm::Value* length = NULLPTR,
-                  llvm::Value* validity = NULLPTR)
-      : data_(data), length_(length), validity_(validity) {}
-
-  llvm::Value* data() { return data_; }
-  llvm::Value* length() { return length_; }
-  llvm::Value* validity() { return validity_; }
-
- private:
-  llvm::Value* data_;
-  llvm::Value* length_;
-  llvm::Value* validity_;
-};
-
-}  // namespace gandiva
-
-#endif  // GANDIVA_LVALUE_H
+#if defined(_MSC_VER)
+#pragma warning( pop )
+#endif

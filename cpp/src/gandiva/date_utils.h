@@ -27,6 +27,14 @@
 
 namespace gandiva {
 
+namespace internal {
+
+// strptime is not available on Windows, so we provide an
+// implementation using the C++11 standard library
+char* strptime_compat(const char* buf, const char* format, struct tm* tm);
+
+}  // namespace internal
+
 /// \brief Utility class for converting sql date patterns to internal date patterns.
 class DateUtils {
  public:

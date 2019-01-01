@@ -18,7 +18,7 @@
 #pragma once
 
 #if defined(_MSC_VER)
-#pragma warning( push )
+#pragma warning(push)
 #pragma warning(disable : 4141)
 #pragma warning(disable : 4146)
 #pragma warning(disable : 4244)
@@ -33,5 +33,5 @@
 #include <llvm/IR/Module.h>
 
 #if defined(_MSC_VER)
-#pragma warning( pop )
+#pragma warning(pop)
 #endif

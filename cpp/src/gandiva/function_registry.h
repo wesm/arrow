@@ -22,11 +22,12 @@
 
 #include "gandiva/gandiva_aliases.h"
 #include "gandiva/native_function.h"
+#include "gandiva/visibility.h"
 
 namespace gandiva {
 
 ///\brief Registry of pre-compiled IR functions.
-class FunctionRegistry {
+class GANDIVA_EXPORT FunctionRegistry {
  public:
   using iterator = const NativeFunction*;
 

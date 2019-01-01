@@ -45,6 +45,7 @@
 #if defined(_MSC_VER)
 #include <intrin.h>
 #pragma intrinsic(_BitScanReverse)
+#pragma intrinsic(_BitScanForward)
 #define ARROW_BYTE_SWAP64 _byteswap_uint64
 #define ARROW_BYTE_SWAP32 _byteswap_ulong
 #else
@@ -180,6 +181,48 @@ static inline int CountLeadingZeros(uint64_t value) {
     ++bitpos;
   }
   return 64 - bitpos;
+#endif
+}
+
+static inline int CountTrailingZeros(uint32_t value) {
+#if defined(__clang__) || defined(__GNUC__)
+  if (value == 0) return 32;
+  return static_cast<int>(__builtin_ctzl(value));
+#elif defined(_MSC_VER)
+  unsigned long index;  // NOLINT
+  if (_BitScanForward(&index, value)) {
+    return static_cast<int>(index);
+  } else {
+    return 32;
+  }
+#else
+  int bitpos = 0;
+  while (value != 0) {
+    value >>= 1;
+    ++bitpos;
+  }
+  return bitpos;
+#endif
+}
+
+static inline int CountTrailingZeros(uint64_t value) {
+#if defined(__clang__) || defined(__GNUC__)
+  if (value == 0) return 64;
+  return static_cast<int>(__builtin_ctzll(value));
+#elif defined(_MSC_VER)
+  unsigned long index;  // NOLINT
+  if (_BitScanForward64(&index, value)) {
+    return static_cast<int>(index);
+  } else {
+    return 64;
+  }
+#else
+  int bitpos = 0;
+  while (value != 0) {
+    value >>= 1;
+    ++bitpos;
+  }
+  return bitpos;
 #endif
 }
 

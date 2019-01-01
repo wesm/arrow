@@ -43,29 +43,29 @@ configure_file(bc_file_path.cc.in ${BC_FILE_PATH_CC})
 add_definitions(-DGANDIVA_BYTE_COMPILE_FILE_PATH="${GANDIVA_BC_OUTPUT_PATH}")
 
 set(SRC_FILES annotator.cc
-      bitmap_accumulator.cc
-      configuration.cc
-      context_helper.cc
-      engine.cc
-      date_utils.cc
-      expr_decomposer.cc
-      expr_validator.cc
-      expression.cc
-      expression_registry.cc
-      exported_funcs_registry.cc
-      filter.cc
-      function_registry.cc
-      function_signature.cc
-      gdv_function_stubs.cc
-      llvm_generator.cc
-      llvm_types.cc
-      like_holder.cc
-      projector.cc
-      regex_util.cc
-      selection_vector.cc
-      tree_expr_builder.cc
-      to_date_holder.cc
-      ${BC_FILE_PATH_CC})
+  bitmap_accumulator.cc
+  configuration.cc
+  context_helper.cc
+  engine.cc
+  date_utils.cc
+  expr_decomposer.cc
+  expr_validator.cc
+  expression.cc
+  expression_registry.cc
+  exported_funcs_registry.cc
+  filter.cc
+  function_registry.cc
+  function_signature.cc
+  gdv_function_stubs.cc
+  llvm_generator.cc
+  llvm_types.cc
+  like_holder.cc
+  projector.cc
+  regex_util.cc
+  selection_vector.cc
+  tree_expr_builder.cc
+  to_date_holder.cc
+  ${BC_FILE_PATH_CC})
 
 set(GANDIVA_SHARED_PRIVATE_LINK_LIBS
   arrow_shared
@@ -94,6 +94,15 @@ ADD_ARROW_LIB(gandiva
   SHARED_LINK_LIBS arrow_shared
   SHARED_PRIVATE_LINK_LIBS ${GANDIVA_SHARED_PRIVATE_LINK_LIBS}
   STATIC_LINK_LIBS ${GANDIVA_STATIC_LINK_LIBS})
+
+foreach(LIB_TARGET ${GANDIVA_LIBRARIES})
+  target_compile_definitions(${LIB_TARGET}
+    PRIVATE GANDIVA_EXPORTING)
+endforeach()
+
+if (ARROW_BUILD_STATIC AND WIN32)
+  target_compile_definitions(gandiva_static PUBLIC GANDIVA_STATIC)
+endif()
 
 add_dependencies(gandiva ${GANDIVA_LIBRARIES})
 

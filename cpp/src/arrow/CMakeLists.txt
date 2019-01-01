@@ -229,10 +229,6 @@ ADD_ARROW_LIB(arrow
 
 add_dependencies(arrow ${ARROW_LIBRARIES})
 
-if (ARROW_BUILD_STATIC AND WIN32)
-  target_compile_definitions(arrow_static PUBLIC ARROW_STATIC)
-endif()
-
 if (ARROW_BUILD_TESTS OR ARROW_BUILD_BENCHMARKS)
   # that depend on gtest
   ADD_ARROW_LIB(arrow_testing

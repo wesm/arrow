@@ -19,15 +19,10 @@
 
 #include <gtest/gtest.h>
 #include "../execution_context.h"
+#include "gandiva/precompiled/testing.h"
 #include "gandiva/precompiled/types.h"
 
 namespace gandiva {
-
-timestamp StringToTimestamp(const char* buf) {
-  struct tm tm;
-  strptime(buf, "%Y-%m-%d %H:%M:%S", &tm);
-  return timegm(&tm) * 1000;  // to millis
-}
 
 TEST(TestTime, TestCastDate) {
   ExecutionContext context;

@@ -27,6 +27,8 @@
 
 namespace gandiva {
 
+using internal::DecimalTypeUtil;
+
 using arrow::boolean;
 using arrow::int32;
 using arrow::int64;

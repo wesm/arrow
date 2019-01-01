@@ -19,12 +19,8 @@
 #include "gandiva/logging.h"
 
 namespace gandiva {
+namespace internal {
 
-constexpr int32_t DecimalTypeUtil::kMaxDecimal32Precision;
-constexpr int32_t DecimalTypeUtil::kMaxDecimal64Precision;
-constexpr int32_t DecimalTypeUtil::kMaxPrecision;
-
-constexpr int32_t DecimalTypeUtil::kMaxScale;
 constexpr int32_t DecimalTypeUtil::kMinAdjustedScale;
 
 #define DCHECK_TYPE(type)                        \
@@ -77,4 +73,5 @@ Status DecimalTypeUtil::GetResultType(Op op, const Decimal128TypeVector& in_type
   return Status::OK();
 }
 
+}  // namespace internal
 }  // namespace gandiva

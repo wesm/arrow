@@ -27,10 +27,9 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-
-#include "arrow/vendored/date.h"
 #endif
 
+#include "arrow/vendored/date.h"
 #include "arrow/util/macros.h"
 
 #include "gandiva/arrow.h"

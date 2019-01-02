@@ -31,6 +31,8 @@
 #include "arrow/vendored/date.h"
 #endif
 
+#include "arrow/util/macros.h"
+
 #include "gandiva/arrow.h"
 #include "gandiva/visibility.h"
 
@@ -61,7 +63,7 @@ namespace internal {
 /// \brief Returns seconds since the UNIX epoch
 static inline bool ParseTimestamp(const char* buf, const char* format, int64_t* out) {
 #if defined(_MSC_VER)
-  static std::locale lc_all(setlocale(LC_ALL, nullptr));
+  static std::locale lc_all(setlocale(LC_ALL, NULLPTR));
   std::istringstream stream(buf);
   stream.imbue(lc_all);
 
@@ -76,7 +78,7 @@ static inline bool ParseTimestamp(const char* buf, const char* format, int64_t* 
 #else
   struct tm result;
   char* ret = strptime(buf, format, &result);
-  if (ret == nullptr) {
+  if (ret == NULLPTR) {
     return false;
   }
   // ignore the time part

@@ -42,6 +42,10 @@ def _strip_comments(line):
         return m.group(0)
 
 
+def _path(*tokens):
+    return os.path.sep.join(tokens)
+
+
 def lint_file(path):
     fail_rules = [
         # rule, error message, rule-specific exclusions list
@@ -49,10 +53,10 @@ def lint_file(path):
         (lambda x: re.match(_NULLPTR_REGEX, x), 'Uses nullptr', []),
         (lambda x: re.match(_RETURN_NOT_OK_REGEX, x),
          'Use ARROW_RETURN_NOT_OK in header files',
-         ['arrow/status.h',
+         [_path('arrow', 'status.h'),
           'test',
-          'arrow/util/hash.h',
-          'arrow/python/util'])
+          _path('arrow', 'util', 'hash.h'),
+          _path('arrow', 'python', 'util')])
     ]
 
     with open(path) as f:
@@ -69,14 +73,14 @@ def lint_file(path):
 
 
 EXCLUSIONS = [
-    'arrow/python/iterators.h',
-    'arrow/util/hashing.h',
-    'arrow/util/macros.h',
-    'arrow/util/parallel.h',
-    'arrow/vendored',
-    'arrow/visitor_inline.h',
-    'gandiva/cache.h',
-    'gandiva/jni',
+    _path('arrow', 'python', 'iterators.h'),
+    _path('arrow', 'util', 'hashing.h'),
+    _path('arrow', 'util', 'macros.h'),
+    _path('arrow', 'util', 'parallel.h'),
+    _path('arrow', 'vendored'),
+    _path('arrow', 'visitor_inline.h'),
+    _path('gandiva', 'cache.h'),
+    _path('gandiva', 'jni'),
     'test',
     'internal'
 ]

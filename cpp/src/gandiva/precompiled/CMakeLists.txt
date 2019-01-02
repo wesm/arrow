@@ -71,14 +71,17 @@ function(add_precompiled_unit_test REL_TEST_NAME)
   set(TEST_NAME "gandiva-precompiled-${TEST_NAME}")
 
   add_executable(${TEST_NAME} ${REL_TEST_NAME} ${ARGN})
-  add_dependencies(gandiva-tests ${TEST_NAME})
   target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(${TEST_NAME}
     PRIVATE ${ARROW_TEST_LINK_LIBS} ${RE2_LIBRARY}
   )
   target_compile_definitions(${TEST_NAME} PRIVATE GANDIVA_UNIT_TEST=1)
-  add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
-  set_property(TEST ${TEST_NAME} PROPERTY LABELS gandiva-tests {TEST_NAME})
+  set(TEST_PATH "${EXECUTABLE_OUTPUT_PATH}/${TEST_NAME}")
+  add_test(${TEST_NAME} ${TEST_PATH})
+  set_property(TEST ${TEST_NAME}
+    APPEND PROPERTY
+    LABELS "unittest;gandiva-tests")
+  add_dependencies(gandiva-tests ${TEST_NAME})
 endfunction(add_precompiled_unit_test REL_TEST_NAME)
 
 # testing

@@ -27,6 +27,8 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+
+#include "arrow/vendored/date.h"
 #endif
 
 #include "gandiva/arrow.h"
@@ -55,20 +57,33 @@ class GANDIVA_EXPORT DateUtils {
 };
 
 namespace internal {
-// strptime is not available on Windows, so we provide an
-// implementation using the C++11 standard library
-static inline char* strptime_compat(const char* buf, const char* format, struct tm* tm) {
+
+/// \brief Returns seconds since the UNIX epoch
+static inline bool ParseTimestamp(const char* buf, const char* format, int64_t* out) {
 #if defined(_MSC_VER)
   static std::locale lc_all(setlocale(LC_ALL, nullptr));
   std::istringstream stream(buf);
   stream.imbue(lc_all);
-  stream >> std::get_time(tm, format);
+
+  date::sys_seconds secs;
+  stream >> date::parse(format, secs);
   if (stream.fail()) {
-    return nullptr;
+    return false;
   }
-  return const_cast<char*>(buf + stream.tellg());
+
+  *out = secs.time_since_epoch().count();
+  return true;
 #else
-  return strptime(buf, format, tm);
+  struct tm result;
+  char* ret = strptime(buf, format, &result);
+  if (ret == nullptr) {
+    return false;
+  }
+  // ignore the time part
+  *out = date::sys_days(date::year(result.tm_year + 1900) / (result.tm_mon + 1) /
+                        result.tm_mday);
+  *out = secs.time_since_epoch().count();
+  return true;
 #endif
 }
 

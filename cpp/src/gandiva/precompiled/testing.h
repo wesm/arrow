@@ -26,17 +26,9 @@
 namespace gandiva {
 
 timestamp StringToTimestamp(const char* buf) {
-  struct tm tm;
-  memset(&tm, 0, sizeof(struct tm));
-  internal::strptime_compat(buf, "%Y-%m-%d %H:%M:%S", &tm);
-
-  struct tm epoch;
-  memset(&epoch, 0, sizeof(struct tm));
-  epoch.tm_year = 70;
-  epoch.tm_mday = 1;
-
-  // Return as milliseconds
-  return static_cast<int64_t>(difftime(mktime(&tm), mktime(&epoch))) * 1000;
+  int64_t out = 0;
+  ARROW_UNUSED(internal::ParseTimestamp(buf, "%Y-%m-%d %H:%M:%S", &out));
+  return out * 1000;
 }
 
 }  // namespace gandiva

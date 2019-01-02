@@ -44,12 +44,12 @@ if (EXISTS "${_protobuf_path}/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
   set (lib_dirs "lib/${CMAKE_LIBRARY_ARCHITECTURE}" ${lib_dirs})
 endif ()
 
-find_library (PROTOBUF_LIBRARY NAMES libprotobuf PATHS
+find_library (PROTOBUF_LIBRARY NAMES protobuf libprotobuf PATHS
   ${_protobuf_path}
   NO_DEFAULT_PATH
   PATH_SUFFIXES ${lib_dirs})
 
-find_library (PROTOC_LIBRARY NAMES libprotoc PATHS
+find_library (PROTOC_LIBRARY NAMES protoc libprotoc PATHS
   ${_protobuf_path}
   NO_DEFAULT_PATH
   PATH_SUFFIXES ${lib_dirs})

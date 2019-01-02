@@ -17,8 +17,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <ctime>
-#include <iomanip>
 #include <memory>
 #include <sstream>
 #include <vector>
@@ -231,18 +229,4 @@ DateUtils::date_format_converter DateUtils::InitMap() {
   return map;
 }
 
-namespace internal {
-
-char* strptime_compat(const char* buf, const char* format, struct tm* tm) {
-  static std::locale lc_all(setlocale(LC_ALL, nullptr));
-  std::istringstream stream(buf);
-  stream.imbue(lc_all);
-  stream >> std::get_time(tm, format);
-  if (stream.fail()) {
-    return nullptr;
-  }
-  return const_cast<char*>(buf + stream.tellg());
-}
-
-}  // namespace internal
 }  // namespace gandiva

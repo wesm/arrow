@@ -23,20 +23,19 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(_MSC_VER)
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#endif
+
 #include "gandiva/arrow.h"
+#include "gandiva/visibility.h"
 
 namespace gandiva {
 
-namespace internal {
-
-// strptime is not available on Windows, so we provide an
-// implementation using the C++11 standard library
-char* strptime_compat(const char* buf, const char* format, struct tm* tm);
-
-}  // namespace internal
-
 /// \brief Utility class for converting sql date patterns to internal date patterns.
-class DateUtils {
+class GANDIVA_EXPORT DateUtils {
  public:
   static Status ToInternalFormat(const std::string& format,
                                  std::shared_ptr<std::string>* internal_format);
@@ -55,6 +54,25 @@ class DateUtils {
   static std::vector<std::string> GetExactMatches(const std::string& pattern);
 };
 
+namespace internal {
+// strptime is not available on Windows, so we provide an
+// implementation using the C++11 standard library
+static inline char* strptime_compat(const char* buf, const char* format, struct tm* tm) {
+#if defined(_MSC_VER)
+  static std::locale lc_all(setlocale(LC_ALL, nullptr));
+  std::istringstream stream(buf);
+  stream.imbue(lc_all);
+  stream >> std::get_time(tm, format);
+  if (stream.fail()) {
+    return nullptr;
+  }
+  return const_cast<char*>(buf + stream.tellg());
+#else
+  return strptime(buf, format, tm);
+#endif
+}
+
+}  // namespace internal
 }  // namespace gandiva
 
 #endif  // TO_DATE_HELPER_H

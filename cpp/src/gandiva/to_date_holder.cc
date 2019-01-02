@@ -83,11 +83,7 @@ int64_t ToDateHolder::operator()(ExecutionContext* context, const std::string& d
   // 1. processes date that do not match the format.
   // 2. does not process time in format +08:00 (or) id.
   struct tm result = {};
-#if defined(_MSC_VER)
   char* ret = internal::strptime_compat(data.c_str(), pattern_.c_str(), &result);
-#else
-  char* ret = strptime(data.c_str(), pattern_.c_str(), &result);
-#endif
   if (ret == nullptr) {
     return_error(context, data);
     return 0;

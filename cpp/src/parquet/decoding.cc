@@ -50,86 +50,13 @@ void Decoder::SetData(int num_values, const uint8_t* data, int len) {
 // ----------------------------------------------------------------------
 // Encoding::PLAIN decoder implementation
 
-template <typename DType>
-PlainDecoder<DType>::PlainDecoder(const ColumnDescriptor* descr)
-    : TypedDecoder<DType>(descr, Encoding::PLAIN) {
-  if (this->descr_ && this->descr_->physical_type() == Type::FIXED_LEN_BYTE_ARRAY) {
-    this->type_length_ = this->descr_->type_length();
-  } else {
-    this->type_length_ = -1;
-  }
-}
-
-// Decode routine templated on C++ type rather than type enum
-template <typename T>
-inline int DecodePlain(const uint8_t* data, int64_t data_size, int num_values,
-                       int type_length, T* out) {
-  int bytes_to_decode = num_values * static_cast<int>(sizeof(T));
-  if (data_size < bytes_to_decode) {
-    ParquetException::EofException();
-  }
-  // If bytes_to_decode == 0, data could be null
-  if (bytes_to_decode > 0) {
-    memcpy(out, data, bytes_to_decode);
-  }
-  return bytes_to_decode;
-}
-
-// Template specialization for BYTE_ARRAY. The written values do not own their
-// own data.
-template <>
-inline int DecodePlain<ByteArray>(const uint8_t* data, int64_t data_size, int num_values,
-                                  int type_length, ByteArray* out) {
-  int bytes_decoded = 0;
-  int increment;
-  for (int i = 0; i < num_values; ++i) {
-    uint32_t len = out[i].len = *reinterpret_cast<const uint32_t*>(data);
-    increment = static_cast<int>(sizeof(uint32_t) + len);
-    if (data_size < increment) ParquetException::EofException();
-    out[i].ptr = data + sizeof(uint32_t);
-    data += increment;
-    data_size -= increment;
-    bytes_decoded += increment;
-  }
-  return bytes_decoded;
-}
-
-// Template specialization for FIXED_LEN_BYTE_ARRAY. The written values do not
-// own their own data.
-template <>
-inline int DecodePlain<FixedLenByteArray>(const uint8_t* data, int64_t data_size,
-                                          int num_values, int type_length,
-                                          FixedLenByteArray* out) {
-  int bytes_to_decode = type_length * num_values;
-  if (data_size < bytes_to_decode) {
-    ParquetException::EofException();
-  }
-  for (int i = 0; i < num_values; ++i) {
-    out[i].ptr = data;
-    data += type_length;
-    data_size -= type_length;
-  }
-  return bytes_to_decode;
-}
-
-template <typename DType>
-int PlainDecoder<DType>::Decode(T* buffer, int max_values) {
-  max_values = std::min(max_values, this->num_values_);
-  int bytes_consumed =
-      DecodePlain<T>(this->data_, this->len_, max_values, this->type_length_, buffer);
-  this->data_ += bytes_consumed;
-  this->len_ -= bytes_consumed;
-  this->num_values_ -= max_values;
-  return max_values;
-}
-
-template class PlainDecoder<Int32Type>;
-template class PlainDecoder<Int64Type>;
-template class PlainDecoder<Int96Type>;
-template class PlainDecoder<FloatType>;
-template class PlainDecoder<DoubleType>;
-template class PlainDecoder<ByteArrayType>;
-template class PlainDecoder<FLBAType>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<Int32Type>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<Int64Type>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<Int96Type>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<FloatType>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<DoubleType>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<ByteArrayType>;
+template class PARQUET_TEMPLATE_EXPORT PlainDecoder<FLBAType>;
 
 PlainBooleanDecoder::PlainBooleanDecoder(const ColumnDescriptor* descr)
     : TypedDecoder<BooleanType>(descr, Encoding::PLAIN) {}
@@ -165,6 +92,15 @@ int PlainBooleanDecoder::Decode(bool* buffer, int max_values) {
   num_values_ -= max_values;
   return max_values;
 }
+
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<BooleanType>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<Int32Type>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<Int64Type>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<Int96Type>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<FloatType>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<DoubleType>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<ByteArrayType>;
+template class PARQUET_TEMPLATE_EXPORT DictDecoder<FLBAType>;
 
 // ----------------------------------------------------------------------
 

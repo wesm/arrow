@@ -31,14 +31,6 @@
 #include "parquet/types.h"
 #include "parquet/util/memory.h"
 
-namespace arrow {
-namespace BitUtil {
-
-class BitWriter;
-
-}  // namespace BitUtil
-}  // namespace arrow
-
 namespace parquet {
 
 class ColumnDescriptor;
@@ -55,13 +47,15 @@ class Encoder {
 
  protected:
   explicit Encoder(const ColumnDescriptor* descr, Encoding::type encoding,
-                   ::arrow::MemoryPool* pool)
-      : descr_(descr), encoding_(encoding), pool_(pool) {}
+                   ::arrow::MemoryPool* pool);
 
   // For accessing type-specific metadata, like FIXED_LEN_BYTE_ARRAY
   const ColumnDescriptor* descr_;
   const Encoding::type encoding_;
   ::arrow::MemoryPool* pool_;
+
+  /// Type length from descr
+  int type_length_;
 };
 
 // Base class for value encoders. Since encoders may or not have state (e.g.,
@@ -77,14 +71,8 @@ class TypedEncoder : public Encoder {
   virtual void PutSpaced(const T* src, int num_values, const uint8_t* valid_bits,
                          int64_t valid_bits_offset) {
     std::shared_ptr<ResizableBuffer> buffer;
-    auto status =
-        ::arrow::AllocateResizableBuffer(pool_, num_values * sizeof(T), &buffer);
-    if (!status.ok()) {
-      std::ostringstream ss;
-      ss << "AllocateResizableBuffer failed in Encoder.PutSpaced in " << __FILE__
-         << ", on line " << __LINE__;
-      throw ParquetException(ss.str());
-    }
+    PARQUET_THROW_NOT_OK(
+        ::arrow::AllocateResizableBuffer(pool_, num_values * sizeof(T), &buffer));
     int32_t num_valid_values = 0;
     ::arrow::internal::BitmapReader valid_bits_reader(valid_bits, valid_bits_offset,
                                                       num_values);
@@ -102,91 +90,6 @@ class TypedEncoder : public Encoder {
   using Encoder::Encoder;
 };
 
-namespace detail {
-
-template <typename DType>
-class PlainEncoder : public TypedEncoder<DType> {
- public:
-  using T = typename DType::c_type;
-
-  explicit PlainEncoder(const ColumnDescriptor* descr,
-                        ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
-
-  int64_t EstimatedDataEncodedSize() override;
-  std::shared_ptr<Buffer> FlushValues() override;
-
-  void Put(const T* buffer, int num_values) override;
-
- protected:
-  std::unique_ptr<InMemoryOutputStream> values_sink_;
-};
-
-}  // namespace detail
-
-class PlainInt32Encoder : public detail::PlainEncoder<Int32Type> {
- public:
-  using BASE = detail::PlainEncoder<Int32Type>;
-  using BASE::PlainEncoder;
-};
-
-class PlainInt64Encoder : public detail::PlainEncoder<Int64Type> {
- public:
-  using BASE = detail::PlainEncoder<Int64Type>;
-  using BASE::PlainEncoder;
-};
-
-class PlainInt96Encoder : public detail::PlainEncoder<Int96Type> {
- public:
-  using BASE = detail::PlainEncoder<Int96Type>;
-  using BASE::PlainEncoder;
-};
-
-class PlainFloatEncoder : public detail::PlainEncoder<FloatType> {
- public:
-  using BASE = detail::PlainEncoder<FloatType>;
-  using BASE::PlainEncoder;
-};
-
-class PlainDoubleEncoder : public detail::PlainEncoder<DoubleType> {
- public:
-  using BASE = detail::PlainEncoder<DoubleType>;
-  using BASE::PlainEncoder;
-};
-
-class PlainByteArrayEncoder : public detail::PlainEncoder<ByteArrayType> {
- public:
-  using BASE = detail::PlainEncoder<ByteArrayType>;
-  using BASE::PlainEncoder;
-};
-
-class PlainFLBAEncoder : public detail::PlainEncoder<FLBAType> {
- public:
-  using BASE = detail::PlainEncoder<FLBAType>;
-  using BASE::PlainEncoder;
-};
-
-class PlainBooleanEncoder : public TypedEncoder<BooleanType> {
- public:
-  explicit PlainBooleanEncoder(
-      const ColumnDescriptor* descr,
-      ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
-
-  int64_t EstimatedDataEncodedSize() override;
-  std::shared_ptr<Buffer> FlushValues() override;
-
-  void Put(const bool* src, int num_values) override;
-  void Put(const std::vector<bool>& src, int num_values);
-
- private:
-  int bits_available_;
-  std::unique_ptr<::arrow::BitUtil::BitWriter> bit_writer_;
-  std::shared_ptr<ResizableBuffer> bits_buffer_;
-  std::unique_ptr<InMemoryOutputStream> values_sink_;
-
-  template <typename SequenceType>
-  void PutImpl(const SequenceType& src, int num_values);
-};
-
 std::unique_ptr<Encoder> MakeEncoder(
     Type::type type_num, Encoding::type encoding, bool use_dictionary,
     const ColumnDescriptor* descr,
@@ -201,48 +104,5 @@ std::unique_ptr<TypedEncoder<DType>> MakeTypedEncoder(
   return std::unique_ptr<TypedEncoder<DType>>(
       ::arrow::internal::checked_cast<TypedEncoder<DType>*>(base.release()));
 }
-
-template <typename T>
-struct EncoderTraits {};
-
-template <>
-struct EncoderTraits<BooleanType> {
-  using PlainEncoder = PlainBooleanEncoder;
-};
-
-template <>
-struct EncoderTraits<Int32Type> {
-  using PlainEncoder = PlainInt32Encoder;
-};
-
-template <>
-struct EncoderTraits<Int64Type> {
-  using PlainEncoder = PlainInt64Encoder;
-};
-
-template <>
-struct EncoderTraits<Int96Type> {
-  using PlainEncoder = PlainInt96Encoder;
-};
-
-template <>
-struct EncoderTraits<FloatType> {
-  using PlainEncoder = PlainFloatEncoder;
-};
-
-template <>
-struct EncoderTraits<DoubleType> {
-  using PlainEncoder = PlainDoubleEncoder;
-};
-
-template <>
-struct EncoderTraits<ByteArrayType> {
-  using PlainEncoder = PlainByteArrayEncoder;
-};
-
-template <>
-struct EncoderTraits<FLBAType> {
-  using PlainEncoder = PlainFLBAEncoder;
-};
 
 }  // namespace parquet

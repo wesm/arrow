@@ -24,6 +24,7 @@
 
 #include "arrow/util/bit-util.h"
 
+#include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
@@ -253,14 +254,14 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
 
   void CheckRoundtrip() {
     std::vector<uint8_t> valid_bits(BitUtil::BytesForBits(num_values_) + 1, 255);
-    DictEncoder<Type> encoder(descr_.get());
+    typename EncoderTraits<Type>::DictEncoder encoder(descr_.get());
 
     ASSERT_NO_THROW(encoder.Put(draws_, num_values_));
     dict_buffer_ = AllocateBuffer(default_memory_pool(), encoder.dict_encoded_size());
     encoder.WriteDict(dict_buffer_->mutable_data());
     std::shared_ptr<Buffer> indices = encoder.FlushValues();
 
-    DictEncoder<Type> spaced_encoder(descr_.get());
+    typename EncoderTraits<Type>::DictEncoder spaced_encoder(descr_.get());
     // PutSpaced should lead to the same results
     ASSERT_NO_THROW(spaced_encoder.PutSpaced(draws_, num_values_, valid_bits.data(), 0));
     std::shared_ptr<Buffer> indices_from_spaced = spaced_encoder.FlushValues();
@@ -270,7 +271,7 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
     dict_decoder->SetData(encoder.num_entries(), dict_buffer_->data(),
                           static_cast<int>(dict_buffer_->size()));
 
-    DictionaryDecoder<Type> decoder(descr_.get());
+    typename DecoderTraits<Type>::DictDecoder decoder(descr_.get());
     decoder.SetDict(dict_decoder.get());
 
     decoder.SetData(num_values_, indices->data(), static_cast<int>(indices->size()));
@@ -303,7 +304,7 @@ TYPED_TEST(TestDictionaryEncoding, BasicRoundTrip) {
 
 TEST(TestDictionaryEncoding, CannotDictDecodeBoolean) {
   PlainBooleanDecoder dict_decoder(nullptr);
-  DictionaryDecoder<BooleanType> decoder(nullptr);
+  DictBooleanDecoder decoder(nullptr);
 
   ASSERT_THROW(decoder.SetDict(&dict_decoder), ParquetException);
 }

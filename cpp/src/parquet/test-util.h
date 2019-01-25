@@ -242,11 +242,12 @@ class DictionaryPageBuilder {
  public:
   typedef typename TYPE::c_type TC;
   static constexpr int TN = TYPE::type_num;
+  using DictEncoderType = typename EncoderTraits<TYPE>::DictEncoder;
 
   // This class writes data and metadata to the passed inputs
   explicit DictionaryPageBuilder(const ColumnDescriptor* d)
       : num_dict_values_(0), have_values_(false) {
-    encoder_.reset(new DictEncoder<TYPE>(d));
+    encoder_.reset(new DictEncoderType(d));
   }
 
   ~DictionaryPageBuilder() {}
@@ -270,7 +271,7 @@ class DictionaryPageBuilder {
   int32_t num_values() const { return num_dict_values_; }
 
  private:
-  shared_ptr<DictEncoder<TYPE>> encoder_;
+  shared_ptr<DictEncoderType> encoder_;
   int32_t num_dict_values_;
   bool have_values_;
 };

@@ -119,73 +119,6 @@ class TypedDecoder : public Decoder {
   using Decoder::Decoder;
 };
 
-template <typename DType>
-class PlainDecoder : public TypedDecoder<DType> {
- public:
-  using T = typename DType::c_type;
-  explicit PlainDecoder(const ColumnDescriptor* descr);
-
-  int Decode(T* buffer, int max_values) override;
-
- protected:
-  using TypedDecoder<DType>::TypedDecoder;
-};
-
-class PlainBooleanDecoder : public TypedDecoder<BooleanType> {
- public:
-  explicit PlainBooleanDecoder(const ColumnDescriptor* descr);
-  void SetData(int num_values, const uint8_t* data, int len) override;
-
-  // Two flavors of bool decoding
-  int Decode(uint8_t* buffer, int max_values);
-  int Decode(bool* buffer, int max_values) override;
-
- private:
-  std::unique_ptr<::arrow::BitUtil::BitReader> bit_reader_;
-};
-
-class PlainInt32Decoder : public PlainDecoder<Int32Type> {
- public:
-  using Base = PlainDecoder<Int32Type>;
-  using Base::PlainDecoder;
-};
-
-class PlainInt64Decoder : public PlainDecoder<Int64Type> {
- public:
-  using Base = PlainDecoder<Int64Type>;
-  using Base::PlainDecoder;
-};
-
-class PlainInt96Decoder : public PlainDecoder<Int96Type> {
- public:
-  using Base = PlainDecoder<Int96Type>;
-  using Base::PlainDecoder;
-};
-
-class PlainFloatDecoder : public PlainDecoder<FloatType> {
- public:
-  using Base = PlainDecoder<FloatType>;
-  using Base::PlainDecoder;
-};
-
-class PlainDoubleDecoder : public PlainDecoder<DoubleType> {
- public:
-  using Base = PlainDecoder<DoubleType>;
-  using Base::PlainDecoder;
-};
-
-class PlainByteArrayDecoder : public PlainDecoder<ByteArrayType> {
- public:
-  using Base = PlainDecoder<ByteArrayType>;
-  using Base::PlainDecoder;
-};
-
-class PlainFLBADecoder : public PlainDecoder<FLBAType> {
- public:
-  using Base = PlainDecoder<FLBAType>;
-  using Base::PlainDecoder;
-};
-
 std::unique_ptr<Decoder> MakeDecoder(Type::type type_num, Encoding::type encoding,
                                      const ColumnDescriptor* descr);
 
@@ -196,48 +129,5 @@ std::unique_ptr<TypedDecoder<DType>> MakeTypedDecoder(Encoding::type encoding,
   return std::unique_ptr<TypedDecoder<DType>>(
       ::arrow::internal::checked_cast<TypedDecoder<DType>*>(base.release()));
 }
-
-template <typename T>
-struct DecoderTraits {};
-
-template <>
-struct DecoderTraits<BooleanType> {
-  using PlainDecoder = PlainBooleanDecoder;
-};
-
-template <>
-struct DecoderTraits<Int32Type> {
-  using PlainDecoder = PlainInt32Decoder;
-};
-
-template <>
-struct DecoderTraits<Int64Type> {
-  using PlainDecoder = PlainInt64Decoder;
-};
-
-template <>
-struct DecoderTraits<Int96Type> {
-  using PlainDecoder = PlainInt96Decoder;
-};
-
-template <>
-struct DecoderTraits<FloatType> {
-  using PlainDecoder = PlainFloatDecoder;
-};
-
-template <>
-struct DecoderTraits<DoubleType> {
-  using PlainDecoder = PlainDoubleDecoder;
-};
-
-template <>
-struct DecoderTraits<ByteArrayType> {
-  using PlainDecoder = PlainByteArrayDecoder;
-};
-
-template <>
-struct DecoderTraits<FLBAType> {
-  using PlainDecoder = PlainFLBADecoder;
-};
 
 }  // namespace parquet

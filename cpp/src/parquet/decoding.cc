@@ -30,6 +30,7 @@
 #include "arrow/util/macros.h"
 #include "arrow/util/rle-encoding.h"
 
+#include "parquet/decoding-internal.h"
 #include "parquet/schema.h"
 #include "parquet/types.h"
 #include "parquet/util/memory.h"

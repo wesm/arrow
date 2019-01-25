@@ -42,10 +42,15 @@ namespace BitUtil = ::arrow::BitUtil;
 
 class ColumnDescriptor;
 
+Encoder::Encoder(const ColumnDescriptor* descr, Encoding::type encoding,
+                 ::arrow::MemoryPool* pool)
+    : descr_(descr),
+      encoding_(encoding),
+      pool_(pool),
+      type_length_(descr ? descr->type_length() : -1) {}
+
 // ----------------------------------------------------------------------
 // Encoding::PLAIN encoder implementation
-
-namespace detail {
 
 template <typename DType>
 PlainEncoder<DType>::PlainEncoder(const ColumnDescriptor* descr,
@@ -101,8 +106,6 @@ template class PlainEncoder<FloatType>;
 template class PlainEncoder<DoubleType>;
 template class PlainEncoder<ByteArrayType>;
 template class PlainEncoder<FLBAType>;
-
-}  // namespace detail
 
 PlainBooleanEncoder::PlainBooleanEncoder(const ColumnDescriptor* descr,
                                          ::arrow::MemoryPool* pool)
@@ -178,6 +181,124 @@ void PlainBooleanEncoder::Put(const std::vector<bool>& src, int num_values) {
 }
 
 // ----------------------------------------------------------------------
+// DictEncoder implementations
+
+DictEncoder::DictEncoder() : dict_encoded_size_(0) {}
+
+int DictEncoder::WriteIndices(uint8_t* buffer, int buffer_len) {
+  // Write bit width in first byte
+  *buffer = static_cast<uint8_t>(bit_width());
+  ++buffer;
+  --buffer_len;
+
+  ::arrow::util::RleEncoder encoder(buffer, buffer_len, bit_width());
+  for (int index : buffered_indices_) {
+    if (!encoder.Put(index)) return -1;
+  }
+  encoder.Flush();
+
+  ClearIndices();
+  return 1 + encoder.len();
+}
+
+// Initially 1024 elements
+static constexpr int32_t INITIAL_HASH_TABLE_SIZE = 1 << 10;
+
+template <typename DType>
+DictEncoderImpl<DType>::DictEncoderImpl(const ColumnDescriptor* desc,
+                                        ::arrow::MemoryPool* pool)
+    : TypedEncoder<DType>(desc, Encoding::PLAIN_DICTIONARY, pool),
+      DictEncoder(),
+      memo_table_(INITIAL_HASH_TABLE_SIZE) {}
+
+template <typename DType>
+int64_t DictEncoderImpl<DType>::EstimatedDataEncodedSize() {
+  // Note: because of the way RleEncoder::CheckBufferFull() is called, we have to
+  // reserve
+  // an extra "RleEncoder::MinBufferSize" bytes. These extra bytes won't be used
+  // but not reserving them would cause the encoder to fail.
+  return 1 +
+         ::arrow::util::RleEncoder::MaxBufferSize(
+             bit_width(), static_cast<int>(buffered_indices_.size())) +
+         ::arrow::util::RleEncoder::MinBufferSize(bit_width());
+}
+
+template <typename DType>
+int DictEncoderImpl<DType>::bit_width() const {
+  if (ARROW_PREDICT_FALSE(num_entries() == 0)) return 0;
+  if (ARROW_PREDICT_FALSE(num_entries() == 1)) return 1;
+  return BitUtil::Log2(num_entries());
+}
+
+template <typename DType>
+std::shared_ptr<Buffer> DictEncoderImpl<DType>::FlushValues() {
+  std::shared_ptr<ResizableBuffer> buffer =
+      AllocateBuffer(this->pool_, EstimatedDataEncodedSize());
+  int result_size =
+      WriteIndices(buffer->mutable_data(), static_cast<int>(EstimatedDataEncodedSize()));
+  PARQUET_THROW_NOT_OK(buffer->Resize(result_size, false));
+  return buffer;
+}
+
+template <typename DType>
+void DictEncoderImpl<DType>::Put(const T* src, int num_values) {
+  for (int32_t i = 0; i < num_values; i++) {
+    Put(src[i]);
+  }
+}
+
+template <typename DType>
+void DictEncoderImpl<DType>::PutSpaced(const T* src, int num_values,
+                                       const uint8_t* valid_bits,
+                                       int64_t valid_bits_offset) {
+  ::arrow::internal::BitmapReader valid_bits_reader(valid_bits, valid_bits_offset,
+                                                    num_values);
+  for (int32_t i = 0; i < num_values; i++) {
+    if (valid_bits_reader.IsSet()) {
+      Put(src[i]);
+    }
+    valid_bits_reader.Next();
+  }
+}
+
+template <typename DType>
+void DictEncoderImpl<DType>::WriteDict(uint8_t* buffer) {
+  // For primitive types, only a memcpy
+  DCHECK_EQ(static_cast<size_t>(dict_encoded_size_), sizeof(T) * memo_table_.size());
+  memo_table_.CopyValues(0 /* start_pos */, reinterpret_cast<T*>(buffer));
+}
+
+// ByteArray and FLBA already have the dictionary encoded in their data heaps
+template <>
+void DictEncoderImpl<ByteArrayType>::WriteDict(uint8_t* buffer) {
+  memo_table_.VisitValues(0, [&](const ::arrow::util::string_view& v) {
+    uint32_t len = static_cast<uint32_t>(v.length());
+    memcpy(buffer, &len, sizeof(uint32_t));
+    buffer += sizeof(uint32_t);
+    memcpy(buffer, v.data(), v.length());
+    buffer += v.length();
+  });
+}
+
+template <>
+void DictEncoderImpl<FLBAType>::WriteDict(uint8_t* buffer) {
+  memo_table_.VisitValues(0, [&](const ::arrow::util::string_view& v) {
+    DCHECK_EQ(v.length(), static_cast<size_t>(type_length_));
+    memcpy(buffer, v.data(), type_length_);
+    buffer += type_length_;
+  });
+}
+
+template class DictEncoderImpl<BooleanType>;
+template class DictEncoderImpl<Int32Type>;
+template class DictEncoderImpl<Int64Type>;
+template class DictEncoderImpl<Int96Type>;
+template class DictEncoderImpl<FloatType>;
+template class DictEncoderImpl<DoubleType>;
+template class DictEncoderImpl<ByteArrayType>;
+template class DictEncoderImpl<FLBAType>;
+
+// ----------------------------------------------------------------------
 // Encoder and decoder factory functions
 
 std::unique_ptr<Encoder> MakeEncoder(Type::type type_num, Encoding::type encoding,
@@ -185,23 +306,22 @@ std::unique_ptr<Encoder> MakeEncoder(Type::type type_num, Encoding::type encodin
                                      ::arrow::MemoryPool* pool) {
   if (use_dictionary) {
     switch (type_num) {
-      case Type::BOOLEAN:
-        return std::unique_ptr<Encoder>(new DictEncoder<BooleanType>(descr, pool));
       case Type::INT32:
-        return std::unique_ptr<Encoder>(new DictEncoder<Int32Type>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictInt32Encoder(descr, pool));
       case Type::INT64:
-        return std::unique_ptr<Encoder>(new DictEncoder<Int64Type>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictInt64Encoder(descr, pool));
       case Type::INT96:
-        return std::unique_ptr<Encoder>(new DictEncoder<Int96Type>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictInt96Encoder(descr, pool));
       case Type::FLOAT:
-        return std::unique_ptr<Encoder>(new DictEncoder<FloatType>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictFloatEncoder(descr, pool));
       case Type::DOUBLE:
-        return std::unique_ptr<Encoder>(new DictEncoder<DoubleType>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictDoubleEncoder(descr, pool));
       case Type::BYTE_ARRAY:
-        return std::unique_ptr<Encoder>(new DictEncoder<ByteArrayType>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictByteArrayEncoder(descr, pool));
       case Type::FIXED_LEN_BYTE_ARRAY:
-        return std::unique_ptr<Encoder>(new DictEncoder<FLBAType>(descr, pool));
+        return std::unique_ptr<Encoder>(new DictFLBAEncoder(descr, pool));
       default:
+        DCHECK(false) << "Encoder not implemented";
         break;
     }
   } else if (encoding == Encoding::PLAIN) {
@@ -223,6 +343,7 @@ std::unique_ptr<Encoder> MakeEncoder(Type::type type_num, Encoding::type encodin
       case Type::FIXED_LEN_BYTE_ARRAY:
         return std::unique_ptr<Encoder>(new PlainFLBAEncoder(descr, pool));
       default:
+        DCHECK(false) << "Encoder not implemented";
         break;
     }
   } else {

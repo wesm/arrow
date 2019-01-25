@@ -29,6 +29,7 @@
 #include <arrow/util/rle-encoding.h>
 
 #include "parquet/column_page.h"
+#include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
@@ -295,14 +296,14 @@ void TypedColumnReader<DType>::ConfigureDictionary(const DictionaryPage* page) {
     auto dictionary = MakeTypedDecoder<DType>(Encoding::PLAIN, descr_);
     dictionary->SetData(page->num_values(), page->data(), page->size());
 
-    // The dictionary is fully decoded during DictionaryDecoder::Init, so the
+    // The dictionary is fully decoded during DictDecoder::Init, so the
     // DictionaryPage buffer is no longer required after this step
     //
     // TODO(wesm): investigate whether this all-or-nothing decoding of the
     // dictionary makes sense and whether performance can be improved
 
-    auto decoder = std::unique_ptr<DictionaryDecoder<DType>>(
-        new DictionaryDecoder<DType>(descr_, pool_));
+    auto decoder = std::unique_ptr<DictDecoder<DType>>(
+        new typename DecoderTraits<DType>::DictDecoder(descr_, pool_));
     decoder->SetDict(dictionary.get());
     decoders_[encoding] = std::move(decoder);
   } else {

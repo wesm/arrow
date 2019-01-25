@@ -17,6 +17,7 @@
 
 #include "benchmark/benchmark.h"
 
+#include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
@@ -107,7 +108,7 @@ static void DecodeDict(std::vector<typename Type::c_type>& values,
   MemoryPool* allocator = default_memory_pool();
   std::shared_ptr<ColumnDescriptor> descr = Int64Schema(Repetition::REQUIRED);
 
-  DictEncoder<Type> encoder(descr.get(), allocator);
+  typename EncoderTraits<Type>::DictEncoder encoder(descr.get(), allocator);
   for (int i = 0; i < num_values; ++i) {
     encoder.Put(values[i]);
   }
@@ -125,10 +126,10 @@ static void DecodeDict(std::vector<typename Type::c_type>& values,
   PARQUET_THROW_NOT_OK(indices->Resize(actual_bytes));
 
   while (state.KeepRunning()) {
-    auto dict_decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr);
+    auto dict_decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr.get());
     dict_decoder->SetData(encoder.num_entries(), dict_buffer->data(),
                           static_cast<int>(dict_buffer->size()));
-    DictionaryDecoder<Type> decoder(descr.get());
+    typename DecoderTraits<Type>::DictDecoder decoder(descr.get());
     decoder.SetDict(dict_decoder.get());
     decoder.SetData(num_values, indices->data(), static_cast<int>(indices->size()));
     decoder.Decode(values.data(), num_values);

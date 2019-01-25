@@ -37,6 +37,7 @@
 
 #include "parquet/column_page.h"
 #include "parquet/column_reader.h"
+#include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
@@ -715,7 +716,8 @@ inline void TypedRecordReader<DType>::ConfigureDictionary(const DictionaryPage* 
     // TODO(wesm): investigate whether this all-or-nothing decoding of the
     // dictionary makes sense and whether performance can be improved
 
-    auto decoder = std::make_shared<DictionaryDecoder<DType>>(descr_, pool_);
+    auto decoder =
+        std::make_shared<typename DecoderTraits<DType>::DictDecoder>(descr_, pool_);
     decoder->SetDict(&dictionary);
     decoders_[encoding] = decoder;
   } else {

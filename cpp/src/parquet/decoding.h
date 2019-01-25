@@ -46,7 +46,7 @@ class ColumnDescriptor;
 // ----------------------------------------------------------------------
 // Value decoding
 
-class Decoder {
+class PARQUET_EXPORT Decoder {
  public:
   virtual ~Decoder() = default;
 
@@ -119,6 +119,7 @@ class TypedDecoder : public Decoder {
   using Decoder::Decoder;
 };
 
+PARQUET_EXPORT
 std::unique_ptr<Decoder> MakeDecoder(Type::type type_num, Encoding::type encoding,
                                      const ColumnDescriptor* descr);
 

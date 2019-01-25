@@ -283,7 +283,7 @@ class PARQUET_TEMPLATE_CLASS_EXPORT DictEncoderImpl : public TypedEncoder<DType>
 
   /// Writes out the encoded dictionary to buffer. buffer must be preallocated to
   /// dict_encoded_size() bytes.
-  void WriteDict(uint8_t* buffer);
+  inline void WriteDict(uint8_t* buffer);
 
   /// The number of entries in the dictionary.
   int num_entries() const { return memo_table_.size(); }

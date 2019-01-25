@@ -87,7 +87,7 @@ class PARQUET_EXPORT Scanner {
 };
 
 template <typename DType>
-class PARQUET_EXPORT TypedScanner : public Scanner {
+class PARQUET_TEMPLATE_CLASS_EXPORT TypedScanner : public Scanner {
  public:
   typedef typename DType::c_type T;
 

@@ -36,7 +36,7 @@ namespace parquet {
 class ColumnDescriptor;
 
 // Untyped base for all encoders
-class Encoder {
+class PARQUET_EXPORT Encoder {
  public:
   virtual ~Encoder() = default;
 
@@ -90,6 +90,7 @@ class TypedEncoder : public Encoder {
   using Encoder::Encoder;
 };
 
+PARQUET_EXPORT
 std::unique_ptr<Encoder> MakeEncoder(
     Type::type type_num, Encoding::type encoding, bool use_dictionary,
     const ColumnDescriptor* descr,

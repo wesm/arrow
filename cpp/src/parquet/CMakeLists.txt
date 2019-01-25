@@ -264,6 +264,10 @@ foreach(LIB_TARGET ${PARQUET_LIBRARIES})
   endif()
 endforeach()
 
+if (ARROW_BUILD_STATIC AND WIN32)
+  target_compile_definitions(parquet_static PUBLIC PARQUET_STATIC)
+endif()
+
 add_subdirectory(api)
 add_subdirectory(arrow)
 add_subdirectory(util)

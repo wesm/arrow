@@ -16,10 +16,13 @@
 // under the License.
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <type_traits>
 
+#include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
+#include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/statistics.h"
 #include "parquet/util/memory.h"
@@ -296,7 +299,7 @@ EncodedStatistics TypedRowGroupStatistics<DType>::Encode() {
 
 template <typename DType>
 void TypedRowGroupStatistics<DType>::PlainEncode(const T& src, std::string* dst) {
-  PlainEncoder<DType> encoder(descr(), pool_);
+  typename EncoderTraits<DType>::PlainEncoder encoder(descr(), pool_);
   encoder.Put(&src, 1);
   auto buffer = encoder.FlushValues();
   auto ptr = reinterpret_cast<const char*>(buffer->data());
@@ -305,10 +308,10 @@ void TypedRowGroupStatistics<DType>::PlainEncode(const T& src, std::string* dst)
 
 template <typename DType>
 void TypedRowGroupStatistics<DType>::PlainDecode(const std::string& src, T* dst) {
-  PlainDecoder<DType> decoder(descr());
-  decoder.SetData(1, reinterpret_cast<const uint8_t*>(src.c_str()),
-                  static_cast<int>(src.size()));
-  decoder.Decode(dst, 1);
+  auto decoder = MakeTypedDecoder<DType>(Encoding::PLAIN, descr());
+  decoder->SetData(1, reinterpret_cast<const uint8_t*>(src.c_str()),
+                   static_cast<int>(src.size()));
+  decoder->Decode(dst, 1);
 }
 
 template <>

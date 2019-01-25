@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PARQUET_ENCODING_INTERNAL_H
-#define PARQUET_ENCODING_INTERNAL_H
+#pragma once
 
 #include <algorithm>
 #include <cstdint>
@@ -30,6 +29,7 @@
 #include "arrow/util/macros.h"
 #include "arrow/util/rle-encoding.h"
 
+#include "parquet/decoding.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/schema.h"
@@ -43,285 +43,10 @@ namespace BitUtil = ::arrow::BitUtil;
 class ColumnDescriptor;
 
 // ----------------------------------------------------------------------
-// Encoding::PLAIN decoder implementation
-
-template <typename DType>
-class PlainDecoder : public Decoder<DType> {
- public:
-  typedef typename DType::c_type T;
-  using Decoder<DType>::num_values_;
-
-  explicit PlainDecoder(const ColumnDescriptor* descr)
-      : Decoder<DType>(descr, Encoding::PLAIN), data_(nullptr), len_(0) {
-    if (descr_ && descr_->physical_type() == Type::FIXED_LEN_BYTE_ARRAY) {
-      type_length_ = descr_->type_length();
-    } else {
-      type_length_ = -1;
-    }
-  }
-
-  virtual void SetData(int num_values, const uint8_t* data, int len) {
-    num_values_ = num_values;
-    data_ = data;
-    len_ = len;
-  }
-
-  virtual int Decode(T* buffer, int max_values);
-
- private:
-  using Decoder<DType>::descr_;
-  const uint8_t* data_;
-  int len_;
-  int type_length_;
-};
-
-// Decode routine templated on C++ type rather than type enum
-template <typename T>
-inline int DecodePlain(const uint8_t* data, int64_t data_size, int num_values,
-                       int type_length, T* out) {
-  int bytes_to_decode = num_values * static_cast<int>(sizeof(T));
-  if (data_size < bytes_to_decode) {
-    ParquetException::EofException();
-  }
-  // If bytes_to_decode == 0, data could be null
-  if (bytes_to_decode > 0) {
-    memcpy(out, data, bytes_to_decode);
-  }
-  return bytes_to_decode;
-}
-
-// Template specialization for BYTE_ARRAY. The written values do not own their
-// own data.
-template <>
-inline int DecodePlain<ByteArray>(const uint8_t* data, int64_t data_size, int num_values,
-                                  int type_length, ByteArray* out) {
-  int bytes_decoded = 0;
-  int increment;
-  for (int i = 0; i < num_values; ++i) {
-    uint32_t len = out[i].len = *reinterpret_cast<const uint32_t*>(data);
-    increment = static_cast<int>(sizeof(uint32_t) + len);
-    if (data_size < increment) ParquetException::EofException();
-    out[i].ptr = data + sizeof(uint32_t);
-    data += increment;
-    data_size -= increment;
-    bytes_decoded += increment;
-  }
-  return bytes_decoded;
-}
-
-// Template specialization for FIXED_LEN_BYTE_ARRAY. The written values do not
-// own their own data.
-template <>
-inline int DecodePlain<FixedLenByteArray>(const uint8_t* data, int64_t data_size,
-                                          int num_values, int type_length,
-                                          FixedLenByteArray* out) {
-  int bytes_to_decode = type_length * num_values;
-  if (data_size < bytes_to_decode) {
-    ParquetException::EofException();
-  }
-  for (int i = 0; i < num_values; ++i) {
-    out[i].ptr = data;
-    data += type_length;
-    data_size -= type_length;
-  }
-  return bytes_to_decode;
-}
-
-template <typename DType>
-inline int PlainDecoder<DType>::Decode(T* buffer, int max_values) {
-  max_values = std::min(max_values, num_values_);
-  int bytes_consumed = DecodePlain<T>(data_, len_, max_values, type_length_, buffer);
-  data_ += bytes_consumed;
-  len_ -= bytes_consumed;
-  num_values_ -= max_values;
-  return max_values;
-}
-
-template <>
-class PlainDecoder<BooleanType> : public Decoder<BooleanType> {
- public:
-  explicit PlainDecoder(const ColumnDescriptor* descr)
-      : Decoder<BooleanType>(descr, Encoding::PLAIN) {}
-
-  virtual void SetData(int num_values, const uint8_t* data, int len) {
-    num_values_ = num_values;
-    bit_reader_ = BitUtil::BitReader(data, len);
-  }
-
-  // Two flavors of bool decoding
-  int Decode(uint8_t* buffer, int max_values) {
-    max_values = std::min(max_values, num_values_);
-    bool val;
-    ::arrow::internal::BitmapWriter bit_writer(buffer, 0, max_values);
-    for (int i = 0; i < max_values; ++i) {
-      if (!bit_reader_.GetValue(1, &val)) {
-        ParquetException::EofException();
-      }
-      if (val) {
-        bit_writer.Set();
-      }
-      bit_writer.Next();
-    }
-    bit_writer.Finish();
-    num_values_ -= max_values;
-    return max_values;
-  }
-
-  virtual int Decode(bool* buffer, int max_values) {
-    max_values = std::min(max_values, num_values_);
-    if (bit_reader_.GetBatch(1, buffer, max_values) != max_values) {
-      ParquetException::EofException();
-    }
-    num_values_ -= max_values;
-    return max_values;
-  }
-
- private:
-  BitUtil::BitReader bit_reader_;
-};
-
-// ----------------------------------------------------------------------
-// Encoding::PLAIN encoder implementation
-
-template <typename DType>
-class PlainEncoder : public Encoder<DType> {
- public:
-  typedef typename DType::c_type T;
-
-  explicit PlainEncoder(const ColumnDescriptor* descr,
-                        ::arrow::MemoryPool* pool = ::arrow::default_memory_pool())
-      : Encoder<DType>(descr, Encoding::PLAIN, pool) {
-    values_sink_.reset(new InMemoryOutputStream(pool));
-  }
-
-  int64_t EstimatedDataEncodedSize() override { return values_sink_->Tell(); }
-
-  std::shared_ptr<Buffer> FlushValues() override;
-  void Put(const T* src, int num_values) override;
-
- protected:
-  std::unique_ptr<InMemoryOutputStream> values_sink_;
-};
-
-template <>
-class PlainEncoder<BooleanType> : public Encoder<BooleanType> {
- public:
-  explicit PlainEncoder(const ColumnDescriptor* descr,
-                        ::arrow::MemoryPool* pool = ::arrow::default_memory_pool())
-      : Encoder<BooleanType>(descr, Encoding::PLAIN, pool),
-        bits_available_(kInMemoryDefaultCapacity * 8),
-        bits_buffer_(AllocateBuffer(pool, kInMemoryDefaultCapacity)),
-        values_sink_(new InMemoryOutputStream(pool)) {
-    bit_writer_.reset(new BitUtil::BitWriter(bits_buffer_->mutable_data(),
-                                             static_cast<int>(bits_buffer_->size())));
-  }
-
-  int64_t EstimatedDataEncodedSize() override {
-    return values_sink_->Tell() + bit_writer_->bytes_written();
-  }
-
-  std::shared_ptr<Buffer> FlushValues() override {
-    if (bits_available_ > 0) {
-      bit_writer_->Flush();
-      values_sink_->Write(bit_writer_->buffer(), bit_writer_->bytes_written());
-      bit_writer_->Clear();
-      bits_available_ = static_cast<int>(bits_buffer_->size()) * 8;
-    }
-
-    std::shared_ptr<Buffer> buffer = values_sink_->GetBuffer();
-    values_sink_.reset(new InMemoryOutputStream(this->pool_));
-    return buffer;
-  }
-
-#define PLAINDECODER_BOOLEAN_PUT(input_type, function_attributes)                 \
-  void Put(input_type src, int num_values) function_attributes {                  \
-    int bit_offset = 0;                                                           \
-    if (bits_available_ > 0) {                                                    \
-      int bits_to_write = std::min(bits_available_, num_values);                  \
-      for (int i = 0; i < bits_to_write; i++) {                                   \
-        bit_writer_->PutValue(src[i], 1);                                         \
-      }                                                                           \
-      bits_available_ -= bits_to_write;                                           \
-      bit_offset = bits_to_write;                                                 \
-                                                                                  \
-      if (bits_available_ == 0) {                                                 \
-        bit_writer_->Flush();                                                     \
-        values_sink_->Write(bit_writer_->buffer(), bit_writer_->bytes_written()); \
-        bit_writer_->Clear();                                                     \
-      }                                                                           \
-    }                                                                             \
-                                                                                  \
-    int bits_remaining = num_values - bit_offset;                                 \
-    while (bit_offset < num_values) {                                             \
-      bits_available_ = static_cast<int>(bits_buffer_->size()) * 8;               \
-                                                                                  \
-      int bits_to_write = std::min(bits_available_, bits_remaining);              \
-      for (int i = bit_offset; i < bit_offset + bits_to_write; i++) {             \
-        bit_writer_->PutValue(src[i], 1);                                         \
-      }                                                                           \
-      bit_offset += bits_to_write;                                                \
-      bits_available_ -= bits_to_write;                                           \
-      bits_remaining -= bits_to_write;                                            \
-                                                                                  \
-      if (bits_available_ == 0) {                                                 \
-        bit_writer_->Flush();                                                     \
-        values_sink_->Write(bit_writer_->buffer(), bit_writer_->bytes_written()); \
-        bit_writer_->Clear();                                                     \
-      }                                                                           \
-    }                                                                             \
-  }
-
-  PLAINDECODER_BOOLEAN_PUT(const bool*, override)
-  PLAINDECODER_BOOLEAN_PUT(const std::vector<bool>&, )
-
- protected:
-  int bits_available_;
-  std::unique_ptr<BitUtil::BitWriter> bit_writer_;
-  std::shared_ptr<ResizableBuffer> bits_buffer_;
-  std::unique_ptr<InMemoryOutputStream> values_sink_;
-};
-
-template <typename DType>
-inline std::shared_ptr<Buffer> PlainEncoder<DType>::FlushValues() {
-  std::shared_ptr<Buffer> buffer = values_sink_->GetBuffer();
-  values_sink_.reset(new InMemoryOutputStream(this->pool_));
-  return buffer;
-}
-
-template <typename DType>
-inline void PlainEncoder<DType>::Put(const T* buffer, int num_values) {
-  values_sink_->Write(reinterpret_cast<const uint8_t*>(buffer), num_values * sizeof(T));
-}
-
-template <>
-inline void PlainEncoder<ByteArrayType>::Put(const ByteArray* src, int num_values) {
-  for (int i = 0; i < num_values; ++i) {
-    // Write the result to the output stream
-    values_sink_->Write(reinterpret_cast<const uint8_t*>(&src[i].len), sizeof(uint32_t));
-    if (src[i].len > 0) {
-      DCHECK(nullptr != src[i].ptr) << "Value ptr cannot be NULL";
-    }
-    values_sink_->Write(reinterpret_cast<const uint8_t*>(src[i].ptr), src[i].len);
-  }
-}
-
-template <>
-inline void PlainEncoder<FLBAType>::Put(const FixedLenByteArray* src, int num_values) {
-  for (int i = 0; i < num_values; ++i) {
-    // Write the result to the output stream
-    if (descr_->type_length() > 0) {
-      DCHECK(nullptr != src[i].ptr) << "Value ptr cannot be NULL";
-    }
-    values_sink_->Write(reinterpret_cast<const uint8_t*>(src[i].ptr),
-                        descr_->type_length());
-  }
-}
-
-// ----------------------------------------------------------------------
 // Dictionary encoding and decoding
 
 template <typename Type>
-class DictionaryDecoder : public Decoder<Type> {
+class DictionaryDecoder : public TypedDecoder<Type> {
  public:
   typedef typename Type::c_type T;
 
@@ -330,12 +55,12 @@ class DictionaryDecoder : public Decoder<Type> {
   // dictionary decoder needs to copy the data out if necessary.
   explicit DictionaryDecoder(const ColumnDescriptor* descr,
                              ::arrow::MemoryPool* pool = ::arrow::default_memory_pool())
-      : Decoder<Type>(descr, Encoding::RLE_DICTIONARY),
+      : TypedDecoder<Type>(descr, Encoding::RLE_DICTIONARY),
         dictionary_(0, pool),
         byte_array_data_(AllocateBuffer(pool, 0)) {}
 
   // Perform type-specific initiatialization
-  void SetDict(Decoder<Type>* dictionary);
+  void SetDict(TypedDecoder<Type>* dictionary);
 
   void SetData(int num_values, const uint8_t* data, int len) override {
     num_values_ = num_values;
@@ -369,7 +94,7 @@ class DictionaryDecoder : public Decoder<Type> {
   }
 
  private:
-  using Decoder<Type>::num_values_;
+  using TypedDecoder<Type>::num_values_;
 
   // Only one is set.
   Vector<T> dictionary_;
@@ -382,20 +107,21 @@ class DictionaryDecoder : public Decoder<Type> {
 };
 
 template <typename Type>
-inline void DictionaryDecoder<Type>::SetDict(Decoder<Type>* dictionary) {
+inline void DictionaryDecoder<Type>::SetDict(TypedDecoder<Type>* dictionary) {
   int num_dictionary_values = dictionary->values_left();
   dictionary_.Resize(num_dictionary_values);
   dictionary->Decode(dictionary_.data(), num_dictionary_values);
 }
 
 template <>
-inline void DictionaryDecoder<BooleanType>::SetDict(Decoder<BooleanType>* dictionary) {
+inline void DictionaryDecoder<BooleanType>::SetDict(
+    TypedDecoder<BooleanType>* dictionary) {
   ParquetException::NYI("Dictionary encoding is not implemented for boolean values");
 }
 
 template <>
 inline void DictionaryDecoder<ByteArrayType>::SetDict(
-    Decoder<ByteArrayType>* dictionary) {
+    TypedDecoder<ByteArrayType>* dictionary) {
   int num_dictionary_values = dictionary->values_left();
   dictionary_.Resize(num_dictionary_values);
   dictionary->Decode(&dictionary_[0], num_dictionary_values);
@@ -418,7 +144,7 @@ inline void DictionaryDecoder<ByteArrayType>::SetDict(
 }
 
 template <>
-inline void DictionaryDecoder<FLBAType>::SetDict(Decoder<FLBAType>* dictionary) {
+inline void DictionaryDecoder<FLBAType>::SetDict(TypedDecoder<FLBAType>* dictionary) {
   int num_dictionary_values = dictionary->values_left();
   dictionary_.Resize(num_dictionary_values);
   dictionary->Decode(&dictionary_[0], num_dictionary_values);
@@ -462,7 +188,7 @@ static constexpr int32_t INITIAL_HASH_TABLE_SIZE = 1 << 10;
 /// written out with the current dictionary size. More values can then be added to
 /// the encoder, including new dictionary entries.
 template <typename DType>
-class DictEncoder : public Encoder<DType> {
+class DictEncoder : public TypedEncoder<DType> {
   using MemoTableType = typename DictEncoderTraits<DType>::MemoTableType;
 
  public:
@@ -470,7 +196,7 @@ class DictEncoder : public Encoder<DType> {
 
   explicit DictEncoder(const ColumnDescriptor* desc,
                        ::arrow::MemoryPool* allocator = ::arrow::default_memory_pool())
-      : Encoder<DType>(desc, Encoding::PLAIN_DICTIONARY, allocator),
+      : TypedEncoder<DType>(desc, Encoding::PLAIN_DICTIONARY, allocator),
         allocator_(allocator),
         dict_encoded_size_(0),
         type_length_(desc->type_length()),
@@ -657,13 +383,13 @@ inline int DictEncoder<DType>::WriteIndices(uint8_t* buffer, int buffer_len) {
 // DeltaBitPackDecoder
 
 template <typename DType>
-class DeltaBitPackDecoder : public Decoder<DType> {
+class DeltaBitPackDecoder : public TypedDecoder<DType> {
  public:
   typedef typename DType::c_type T;
 
   explicit DeltaBitPackDecoder(const ColumnDescriptor* descr,
                                ::arrow::MemoryPool* pool = ::arrow::default_memory_pool())
-      : Decoder<DType>(descr, Encoding::DELTA_BINARY_PACKED), pool_(pool) {
+      : TypedDecoder<DType>(descr, Encoding::DELTA_BINARY_PACKED), pool_(pool) {
     if (DType::type_num != Type::INT32 && DType::type_num != Type::INT64) {
       throw ParquetException("Delta bit pack encoding should only be for integer data.");
     }
@@ -681,7 +407,7 @@ class DeltaBitPackDecoder : public Decoder<DType> {
   }
 
  private:
-  using Decoder<DType>::num_values_;
+  using TypedDecoder<DType>::num_values_;
 
   void InitBlock() {
     int32_t block_size;
@@ -754,12 +480,12 @@ class DeltaBitPackDecoder : public Decoder<DType> {
 // ----------------------------------------------------------------------
 // DELTA_LENGTH_BYTE_ARRAY
 
-class DeltaLengthByteArrayDecoder : public Decoder<ByteArrayType> {
+class DeltaLengthByteArrayDecoder : public TypedDecoder<ByteArrayType> {
  public:
   explicit DeltaLengthByteArrayDecoder(
       const ColumnDescriptor* descr,
       ::arrow::MemoryPool* pool = ::arrow::default_memory_pool())
-      : Decoder<ByteArrayType>(descr, Encoding::DELTA_LENGTH_BYTE_ARRAY),
+      : TypedDecoder<ByteArrayType>(descr, Encoding::DELTA_LENGTH_BYTE_ARRAY),
         len_decoder_(nullptr, pool) {}
 
   virtual void SetData(int num_values, const uint8_t* data, int len) {
@@ -787,21 +513,21 @@ class DeltaLengthByteArrayDecoder : public Decoder<ByteArrayType> {
   }
 
  private:
-  using Decoder<ByteArrayType>::num_values_;
+  using TypedDecoder<ByteArrayType>::num_values_;
+  using TypedDecoder<ByteArrayType>::data_;
+  using TypedDecoder<ByteArrayType>::len_;
   DeltaBitPackDecoder<Int32Type> len_decoder_;
-  const uint8_t* data_;
-  int len_;
 };
 
 // ----------------------------------------------------------------------
 // DELTA_BYTE_ARRAY
 
-class DeltaByteArrayDecoder : public Decoder<ByteArrayType> {
+class DeltaByteArrayDecoder : public TypedDecoder<ByteArrayType> {
  public:
   explicit DeltaByteArrayDecoder(
       const ColumnDescriptor* descr,
       ::arrow::MemoryPool* pool = ::arrow::default_memory_pool())
-      : Decoder<ByteArrayType>(descr, Encoding::DELTA_BYTE_ARRAY),
+      : TypedDecoder<ByteArrayType>(descr, Encoding::DELTA_BYTE_ARRAY),
         prefix_len_decoder_(nullptr, pool),
         suffix_decoder_(nullptr, pool),
         last_value_(0, nullptr) {}
@@ -841,13 +567,14 @@ class DeltaByteArrayDecoder : public Decoder<ByteArrayType> {
   }
 
  private:
-  using Decoder<ByteArrayType>::num_values_;
+  using TypedDecoder<ByteArrayType>::num_values_;
 
   DeltaBitPackDecoder<Int32Type> prefix_len_decoder_;
   DeltaLengthByteArrayDecoder suffix_decoder_;
   ByteArray last_value_;
 };
 
-}  // namespace parquet
+// ----------------------------------------------------------------------
+// Encoder and decoder factory functions
 
-#endif  // PARQUET_ENCODING_INTERNAL_H
+}  // namespace parquet

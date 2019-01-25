@@ -29,7 +29,9 @@
 #include <arrow/util/rle-encoding.h>
 
 #include "parquet/column_page.h"
+#include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
+#include "parquet/encoding.h"
 #include "parquet/properties.h"
 #include "parquet/thrift.h"
 
@@ -290,8 +292,8 @@ void TypedColumnReader<DType>::ConfigureDictionary(const DictionaryPage* page) {
 
   if (page->encoding() == Encoding::PLAIN_DICTIONARY ||
       page->encoding() == Encoding::PLAIN) {
-    PlainDecoder<DType> dictionary(descr_);
-    dictionary.SetData(page->num_values(), page->data(), page->size());
+    auto dictionary = MakeTypedDecoder<DType>(Encoding::PLAIN, descr_);
+    dictionary->SetData(page->num_values(), page->data(), page->size());
 
     // The dictionary is fully decoded during DictionaryDecoder::Init, so the
     // DictionaryPage buffer is no longer required after this step
@@ -299,9 +301,10 @@ void TypedColumnReader<DType>::ConfigureDictionary(const DictionaryPage* page) {
     // TODO(wesm): investigate whether this all-or-nothing decoding of the
     // dictionary makes sense and whether performance can be improved
 
-    auto decoder = std::make_shared<DictionaryDecoder<DType>>(descr_, pool_);
-    decoder->SetDict(&dictionary);
-    decoders_[encoding] = decoder;
+    auto decoder = std::unique_ptr<DictionaryDecoder<DType>>(
+        new DictionaryDecoder<DType>(descr_, pool_));
+    decoder->SetDict(dictionary.get());
+    decoders_[encoding] = std::move(decoder);
   } else {
     ParquetException::NYI("only plain dictionary encoding has been implemented");
   }
@@ -385,9 +388,9 @@ bool TypedColumnReader<DType>::ReadNewPage() {
       } else {
         switch (encoding) {
           case Encoding::PLAIN: {
-            std::shared_ptr<DecoderType> decoder(new PlainDecoder<DType>(descr_));
-            decoders_[static_cast<int>(encoding)] = decoder;
+            auto decoder = MakeTypedDecoder<DType>(Encoding::PLAIN, descr_);
             current_decoder_ = decoder.get();
+            decoders_[static_cast<int>(encoding)] = std::move(decoder);
             break;
           }
           case Encoding::RLE_DICTIONARY:

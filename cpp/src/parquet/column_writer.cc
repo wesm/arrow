@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "arrow/util/bit-util.h"
+#include "arrow/util/checked_cast.h"
 #include "arrow/util/compression.h"
 #include "arrow/util/logging.h"
 #include "arrow/util/rle-encoding.h"
@@ -33,6 +34,8 @@
 #include "parquet/util/memory.h"
 
 namespace parquet {
+
+using ::arrow::internal::checked_cast;
 
 using BitWriter = ::arrow::BitUtil::BitWriter;
 using RleEncoder = ::arrow::util::RleEncoder;
@@ -538,13 +541,8 @@ TypedColumnWriter<Type>::TypedColumnWriter(ColumnChunkMetaDataBuilder* metadata,
                                            Encoding::type encoding,
                                            const WriterProperties* properties)
     : ColumnWriter(metadata, std::move(pager), use_dictionary, encoding, properties) {
-  if (use_dictionary) {
-    current_encoder_.reset(new DictEncoder<Type>(descr_, properties->memory_pool()));
-  } else if (encoding == Encoding::PLAIN) {
-    current_encoder_.reset(new PlainEncoder<Type>(descr_, properties->memory_pool()));
-  } else {
-    ParquetException::NYI("Selected encoding is not supported");
-  }
+  current_encoder_ =
+      MakeTypedEncoder<Type>(encoding, use_dictionary, descr_, properties->memory_pool());
 
   if (properties->statistics_enabled(descr_->path()) &&
       (SortOrder::UNKNOWN != descr_->sort_order())) {
@@ -564,7 +562,8 @@ void TypedColumnWriter<Type>::CheckDictionarySizeLimit() {
     FlushBufferedDataPages();
     fallback_ = true;
     // Only PLAIN encoding is supported for fallback in V1
-    current_encoder_.reset(new PlainEncoder<Type>(descr_, properties_->memory_pool()));
+    current_encoder_.reset(new typename EncoderTraits<Type>::PlainEncoder(
+        descr_, properties_->memory_pool()));
     encoding_ = Encoding::PLAIN;
   }
 }

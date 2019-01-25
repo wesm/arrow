@@ -132,7 +132,7 @@ class DataPageBuilder {
 
   void AppendValues(const ColumnDescriptor* d, const vector<T>& values,
                     Encoding::type encoding = Encoding::PLAIN) {
-    PlainEncoder<Type> encoder(d);
+    typename EncoderTraits<Type>::PlainEncoder encoder(d);
     encoder.Put(&values[0], static_cast<int>(values.size()));
     std::shared_ptr<Buffer> values_sink = encoder.FlushValues();
     sink_->Write(values_sink->data(), values_sink->size());
@@ -194,7 +194,7 @@ void DataPageBuilder<BooleanType>::AppendValues(const ColumnDescriptor* d,
   if (encoding != Encoding::PLAIN) {
     ParquetException::NYI("only plain encoding currently implemented");
   }
-  PlainEncoder<BooleanType> encoder(d);
+  PlainBooleanEncoder encoder(d);
   encoder.Put(values, static_cast<int>(values.size()));
   std::shared_ptr<Buffer> buffer = encoder.FlushValues();
   sink_->Write(buffer->data(), buffer->size());

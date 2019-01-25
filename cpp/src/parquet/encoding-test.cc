@@ -24,7 +24,9 @@
 
 #include "arrow/util/bit-util.h"
 
+#include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
+#include "parquet/encoding.h"
 #include "parquet/schema.h"
 #include "parquet/types.h"
 #include "parquet/util/memory.h"
@@ -48,8 +50,8 @@ TEST(VectorBooleanTest, TestEncodeDecode) {
   // seed the prng so failure is deterministic
   vector<bool> draws = flip_coins_seed(nvalues, 0.5, 0);
 
-  PlainEncoder<BooleanType> encoder(nullptr);
-  PlainDecoder<BooleanType> decoder(nullptr);
+  PlainBooleanEncoder encoder(nullptr);
+  PlainBooleanDecoder decoder(nullptr);
 
   encoder.Put(draws, nvalues);
 
@@ -214,14 +216,14 @@ class TestPlainEncoding : public TestEncodingBase<Type> {
   static constexpr int TYPE = Type::type_num;
 
   virtual void CheckRoundtrip() {
-    PlainEncoder<Type> encoder(descr_.get());
-    PlainDecoder<Type> decoder(descr_.get());
-    encoder.Put(draws_, num_values_);
-    encode_buffer_ = encoder.FlushValues();
+    auto encoder = MakeTypedEncoder<Type>(Encoding::PLAIN, false, descr_.get());
+    auto decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr_.get());
+    encoder->Put(draws_, num_values_);
+    encode_buffer_ = encoder->FlushValues();
 
-    decoder.SetData(num_values_, encode_buffer_->data(),
-                    static_cast<int>(encode_buffer_->size()));
-    int values_decoded = decoder.Decode(decode_buf_, num_values_);
+    decoder->SetData(num_values_, encode_buffer_->data(),
+                     static_cast<int>(encode_buffer_->size()));
+    int values_decoded = decoder->Decode(decode_buf_, num_values_);
     ASSERT_EQ(num_values_, values_decoded);
     ASSERT_NO_FATAL_FAILURE(VerifyResults<T>(decode_buf_, draws_, num_values_));
   }
@@ -264,12 +266,12 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
     std::shared_ptr<Buffer> indices_from_spaced = spaced_encoder.FlushValues();
     ASSERT_TRUE(indices_from_spaced->Equals(*indices));
 
-    PlainDecoder<Type> dict_decoder(descr_.get());
-    dict_decoder.SetData(encoder.num_entries(), dict_buffer_->data(),
-                         static_cast<int>(dict_buffer_->size()));
+    auto dict_decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr_.get());
+    dict_decoder->SetData(encoder.num_entries(), dict_buffer_->data(),
+                          static_cast<int>(dict_buffer_->size()));
 
     DictionaryDecoder<Type> decoder(descr_.get());
-    decoder.SetDict(&dict_decoder);
+    decoder.SetDict(dict_decoder.get());
 
     decoder.SetData(num_values_, indices->data(), static_cast<int>(indices->size()));
     int values_decoded = decoder.Decode(decode_buf_, num_values_);
@@ -300,7 +302,7 @@ TYPED_TEST(TestDictionaryEncoding, BasicRoundTrip) {
 }
 
 TEST(TestDictionaryEncoding, CannotDictDecodeBoolean) {
-  PlainDecoder<BooleanType> dict_decoder(nullptr);
+  PlainBooleanDecoder dict_decoder(nullptr);
   DictionaryDecoder<BooleanType> decoder(nullptr);
 
   ASSERT_THROW(decoder.SetDict(&dict_decoder), ParquetException);

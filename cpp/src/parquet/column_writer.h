@@ -297,13 +297,12 @@ class PARQUET_TEMPLATE_CLASS_EXPORT TypedColumnWriter : public ColumnWriter {
                                int64_t valid_bits_offset, const T* values,
                                int64_t* num_spaced_written);
 
-  typedef Encoder<DType> EncoderType;
-
   // Write values to a temporary buffer before they are encoded into pages
   void WriteValues(int64_t num_values, const T* values);
   void WriteValuesSpaced(int64_t num_values, const uint8_t* valid_bits,
                          int64_t valid_bits_offset, const T* values);
-  std::unique_ptr<EncoderType> current_encoder_;
+
+  std::unique_ptr<TypedEncoder<DType>> current_encoder_;
 
   typedef TypedRowGroupStatistics<DType> TypedStats;
   std::unique_ptr<TypedStats> page_statistics_;

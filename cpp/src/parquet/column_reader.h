@@ -34,6 +34,7 @@
 #include <arrow/util/bit-util.h>
 
 #include "parquet/column_page.h"
+#include "parquet/decoding.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/schema.h"
@@ -290,7 +291,7 @@ class PARQUET_TEMPLATE_CLASS_EXPORT TypedColumnReader : public ColumnReader {
   int64_t Skip(int64_t num_rows_to_skip);
 
  private:
-  typedef Decoder<DType> DecoderType;
+  using DecoderType = TypedDecoder<DType>;
 
   // Advance to the next data page
   bool ReadNewPage() override;
@@ -312,10 +313,9 @@ class PARQUET_TEMPLATE_CLASS_EXPORT TypedColumnReader : public ColumnReader {
   // Map of encoding type to the respective decoder object. For example, a
   // column chunk's data pages may include both dictionary-encoded and
   // plain-encoded data.
-  std::unordered_map<int, std::shared_ptr<DecoderType>> decoders_;
+  std::unordered_map<int, std::unique_ptr<DecoderType>> decoders_;
 
   void ConfigureDictionary(const DictionaryPage* page);
-
   DecoderType* current_decoder_;
 };
 

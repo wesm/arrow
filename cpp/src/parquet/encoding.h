@@ -15,38 +15,64 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef PARQUET_ENCODING_H
-#define PARQUET_ENCODING_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
 #include <sstream>
+#include <vector>
 
 #include "arrow/status.h"
 #include "arrow/util/bit-util.h"
+#include "arrow/util/checked_cast.h"
 
 #include "parquet/exception.h"
 #include "parquet/schema.h"
 #include "parquet/types.h"
 #include "parquet/util/memory.h"
 
+namespace arrow {
+namespace BitUtil {
+
+class BitWriter;
+
+}  // namespace BitUtil
+}  // namespace arrow
+
 namespace parquet {
 
 class ColumnDescriptor;
+
+// Untyped base for all encoders
+class Encoder {
+ public:
+  virtual ~Encoder() = default;
+
+  virtual int64_t EstimatedDataEncodedSize() = 0;
+  virtual std::shared_ptr<Buffer> FlushValues() = 0;
+
+  Encoding::type encoding() const { return encoding_; }
+
+ protected:
+  explicit Encoder(const ColumnDescriptor* descr, Encoding::type encoding,
+                   ::arrow::MemoryPool* pool)
+      : descr_(descr), encoding_(encoding), pool_(pool) {}
+
+  // For accessing type-specific metadata, like FIXED_LEN_BYTE_ARRAY
+  const ColumnDescriptor* descr_;
+  const Encoding::type encoding_;
+  ::arrow::MemoryPool* pool_;
+};
 
 // Base class for value encoders. Since encoders may or not have state (e.g.,
 // dictionary encoding) we use a class instance to maintain any state.
 //
 // TODO(wesm): Encode interface API is temporary
 template <typename DType>
-class Encoder {
+class TypedEncoder : public Encoder {
  public:
   typedef typename DType::c_type T;
 
-  virtual ~Encoder() {}
-
-  virtual int64_t EstimatedDataEncodedSize() = 0;
-  virtual std::shared_ptr<Buffer> FlushValues() = 0;
   virtual void Put(const T* src, int num_values) = 0;
   virtual void PutSpaced(const T* src, int num_values, const uint8_t* valid_bits,
                          int64_t valid_bits_offset) {
@@ -72,82 +98,151 @@ class Encoder {
     Put(data, num_valid_values);
   }
 
-  Encoding::type encoding() const { return encoding_; }
-
  protected:
-  explicit Encoder(const ColumnDescriptor* descr, Encoding::type encoding,
-                   ::arrow::MemoryPool* pool)
-      : descr_(descr), encoding_(encoding), pool_(pool) {}
-
-  // For accessing type-specific metadata, like FIXED_LEN_BYTE_ARRAY
-  const ColumnDescriptor* descr_;
-  const Encoding::type encoding_;
-  ::arrow::MemoryPool* pool_;
+  using Encoder::Encoder;
 };
 
-// The Decoder template is parameterized on parquet::DataType subclasses
+namespace detail {
+
 template <typename DType>
-class Decoder {
+class PlainEncoder : public TypedEncoder<DType> {
  public:
-  typedef typename DType::c_type T;
+  using T = typename DType::c_type;
 
-  virtual ~Decoder() {}
+  explicit PlainEncoder(const ColumnDescriptor* descr,
+                        ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
 
-  // Sets the data for a new page. This will be called multiple times on the same
-  // decoder and should reset all internal state.
-  virtual void SetData(int num_values, const uint8_t* data, int len) = 0;
+  int64_t EstimatedDataEncodedSize() override;
+  std::shared_ptr<Buffer> FlushValues() override;
 
-  // Subclasses should override the ones they support. In each of these functions,
-  // the decoder would decode put to 'max_values', storing the result in 'buffer'.
-  // The function returns the number of values decoded, which should be max_values
-  // except for end of the current data page.
-  virtual int Decode(T* buffer, int max_values) = 0;
-
-  // Decode the values in this data page but leave spaces for null entries.
-  //
-  // num_values is the size of the def_levels and buffer arrays including the number of
-  // null values.
-  virtual int DecodeSpaced(T* buffer, int num_values, int null_count,
-                           const uint8_t* valid_bits, int64_t valid_bits_offset) {
-    int values_to_read = num_values - null_count;
-    int values_read = Decode(buffer, values_to_read);
-    if (values_read != values_to_read) {
-      throw ParquetException("Number of values / definition_levels read did not match");
-    }
-
-    // Depending on the number of nulls, some of the value slots in buffer may
-    // be uninitialized, and this will cause valgrind warnings / potentially UB
-    memset(static_cast<void*>(buffer + values_read), 0,
-           (num_values - values_read) * sizeof(T));
-
-    // Add spacing for null entries. As we have filled the buffer from the front,
-    // we need to add the spacing from the back.
-    int values_to_move = values_read;
-    for (int i = num_values - 1; i >= 0; i--) {
-      if (::arrow::BitUtil::GetBit(valid_bits, valid_bits_offset + i)) {
-        buffer[i] = buffer[--values_to_move];
-      }
-    }
-    return num_values;
-  }
-
-  // Returns the number of values left (for the last call to SetData()). This is
-  // the number of values left in this page.
-  int values_left() const { return num_values_; }
-
-  Encoding::type encoding() const { return encoding_; }
+  void Put(const T* buffer, int num_values) override;
 
  protected:
-  explicit Decoder(const ColumnDescriptor* descr, Encoding::type encoding)
-      : descr_(descr), encoding_(encoding), num_values_(0) {}
+  std::unique_ptr<InMemoryOutputStream> values_sink_;
+};
 
-  // For accessing type-specific metadata, like FIXED_LEN_BYTE_ARRAY
-  const ColumnDescriptor* descr_;
+}  // namespace detail
 
-  const Encoding::type encoding_;
-  int num_values_;
+class PlainInt32Encoder : public detail::PlainEncoder<Int32Type> {
+ public:
+  using BASE = detail::PlainEncoder<Int32Type>;
+  using BASE::PlainEncoder;
+};
+
+class PlainInt64Encoder : public detail::PlainEncoder<Int64Type> {
+ public:
+  using BASE = detail::PlainEncoder<Int64Type>;
+  using BASE::PlainEncoder;
+};
+
+class PlainInt96Encoder : public detail::PlainEncoder<Int96Type> {
+ public:
+  using BASE = detail::PlainEncoder<Int96Type>;
+  using BASE::PlainEncoder;
+};
+
+class PlainFloatEncoder : public detail::PlainEncoder<FloatType> {
+ public:
+  using BASE = detail::PlainEncoder<FloatType>;
+  using BASE::PlainEncoder;
+};
+
+class PlainDoubleEncoder : public detail::PlainEncoder<DoubleType> {
+ public:
+  using BASE = detail::PlainEncoder<DoubleType>;
+  using BASE::PlainEncoder;
+};
+
+class PlainByteArrayEncoder : public detail::PlainEncoder<ByteArrayType> {
+ public:
+  using BASE = detail::PlainEncoder<ByteArrayType>;
+  using BASE::PlainEncoder;
+};
+
+class PlainFLBAEncoder : public detail::PlainEncoder<FLBAType> {
+ public:
+  using BASE = detail::PlainEncoder<FLBAType>;
+  using BASE::PlainEncoder;
+};
+
+class PlainBooleanEncoder : public TypedEncoder<BooleanType> {
+ public:
+  explicit PlainBooleanEncoder(
+      const ColumnDescriptor* descr,
+      ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
+
+  int64_t EstimatedDataEncodedSize() override;
+  std::shared_ptr<Buffer> FlushValues() override;
+
+  void Put(const bool* src, int num_values) override;
+  void Put(const std::vector<bool>& src, int num_values);
+
+ private:
+  int bits_available_;
+  std::unique_ptr<::arrow::BitUtil::BitWriter> bit_writer_;
+  std::shared_ptr<ResizableBuffer> bits_buffer_;
+  std::unique_ptr<InMemoryOutputStream> values_sink_;
+
+  template <typename SequenceType>
+  void PutImpl(const SequenceType& src, int num_values);
+};
+
+std::unique_ptr<Encoder> MakeEncoder(
+    Type::type type_num, Encoding::type encoding, bool use_dictionary,
+    const ColumnDescriptor* descr,
+    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
+
+template <typename DType>
+std::unique_ptr<TypedEncoder<DType>> MakeTypedEncoder(
+    Encoding::type encoding, bool use_dictionary, const ColumnDescriptor* descr,
+    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool()) {
+  std::unique_ptr<Encoder> base =
+      MakeEncoder(DType::type_num, encoding, use_dictionary, descr, pool);
+  return std::unique_ptr<TypedEncoder<DType>>(
+      ::arrow::internal::checked_cast<TypedEncoder<DType>*>(base.release()));
+}
+
+template <typename T>
+struct EncoderTraits {};
+
+template <>
+struct EncoderTraits<BooleanType> {
+  using PlainEncoder = PlainBooleanEncoder;
+};
+
+template <>
+struct EncoderTraits<Int32Type> {
+  using PlainEncoder = PlainInt32Encoder;
+};
+
+template <>
+struct EncoderTraits<Int64Type> {
+  using PlainEncoder = PlainInt64Encoder;
+};
+
+template <>
+struct EncoderTraits<Int96Type> {
+  using PlainEncoder = PlainInt96Encoder;
+};
+
+template <>
+struct EncoderTraits<FloatType> {
+  using PlainEncoder = PlainFloatEncoder;
+};
+
+template <>
+struct EncoderTraits<DoubleType> {
+  using PlainEncoder = PlainDoubleEncoder;
+};
+
+template <>
+struct EncoderTraits<ByteArrayType> {
+  using PlainEncoder = PlainByteArrayEncoder;
+};
+
+template <>
+struct EncoderTraits<FLBAType> {
+  using PlainEncoder = PlainFLBAEncoder;
 };
 
 }  // namespace parquet
-
-#endif  // PARQUET_ENCODING_H

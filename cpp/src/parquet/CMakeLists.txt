@@ -172,6 +172,8 @@ set(PARQUET_SRCS
   column_reader.cc
   column_scanner.cc
   column_writer.cc
+  decoding.cc
+  encoding.cc
   file_reader.cc
   file_writer.cc
   metadata.cc

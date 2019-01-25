@@ -37,6 +37,7 @@
 
 #include "parquet/column_page.h"
 #include "parquet/column_reader.h"
+#include "parquet/decoding.h"
 #include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
@@ -559,7 +560,7 @@ class TypedRecordReader : public RecordReader::RecordReaderImpl {
   }
 
  private:
-  typedef Decoder<DType> DecoderType;
+  typedef TypedDecoder<DType> DecoderType;
 
   // Map of encoding type to the respective decoder object. For example, a
   // column chunk's data pages may include both dictionary-encoded and
@@ -705,7 +706,7 @@ inline void TypedRecordReader<DType>::ConfigureDictionary(const DictionaryPage* 
 
   if (page->encoding() == Encoding::PLAIN_DICTIONARY ||
       page->encoding() == Encoding::PLAIN) {
-    PlainDecoder<DType> dictionary(descr_);
+    typename DecoderTraits<DType>::PlainDecoder dictionary(descr_);
     dictionary.SetData(page->num_values(), page->data(), page->size());
 
     // The dictionary is fully decoded during DictionaryDecoder::Init, so the
@@ -794,7 +795,8 @@ bool TypedRecordReader<DType>::ReadNewPage() {
       } else {
         switch (encoding) {
           case Encoding::PLAIN: {
-            std::shared_ptr<DecoderType> decoder(new PlainDecoder<DType>(descr_));
+            std::shared_ptr<DecoderType> decoder(
+                new typename DecoderTraits<DType>::PlainDecoder(descr_));
             decoders_[static_cast<int>(encoding)] = decoder;
             current_decoder_ = decoder.get();
             break;

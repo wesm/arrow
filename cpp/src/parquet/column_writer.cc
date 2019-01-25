@@ -21,19 +21,21 @@
 #include <memory>
 #include <utility>
 
+#include "arrow/util/bit-stream-utils.h"
 #include "arrow/util/bit-util.h"
 #include "arrow/util/checked_cast.h"
 #include "arrow/util/compression.h"
 #include "arrow/util/logging.h"
 #include "arrow/util/rle-encoding.h"
 
-#include "parquet/encoding-internal.h"
 #include "parquet/properties.h"
 #include "parquet/statistics.h"
 #include "parquet/thrift.h"
 #include "parquet/util/memory.h"
 
 namespace parquet {
+
+namespace BitUtil = ::arrow::BitUtil;
 
 using ::arrow::internal::checked_cast;
 
@@ -541,8 +543,8 @@ TypedColumnWriter<Type>::TypedColumnWriter(ColumnChunkMetaDataBuilder* metadata,
                                            Encoding::type encoding,
                                            const WriterProperties* properties)
     : ColumnWriter(metadata, std::move(pager), use_dictionary, encoding, properties) {
-  current_encoder_ =
-      MakeTypedEncoder<Type>(encoding, use_dictionary, descr_, properties->memory_pool());
+  current_encoder_ = MakeEncoder(Type::type_num, encoding, use_dictionary, descr_,
+                                 properties->memory_pool());
 
   if (properties->statistics_enabled(descr_->path()) &&
       (SortOrder::UNKNOWN != descr_->sort_order())) {
@@ -555,18 +557,15 @@ TypedColumnWriter<Type>::TypedColumnWriter(ColumnChunkMetaDataBuilder* metadata,
 // Fallback to PLAIN if dictionary page limit is reached.
 template <typename Type>
 void TypedColumnWriter<Type>::CheckDictionarySizeLimit() {
-  // We dynamic_cast here because TypedEncoder<Type> is not considered to be a
-  // subclass of DictEncoder
-  auto dict_encoder = dynamic_cast<DictEncoder*>(current_encoder_.get());
-  DCHECK(dict_encoder);
+  auto dict_encoder = checked_cast<DictEncoder*>(current_encoder_.get());
   if (dict_encoder->dict_encoded_size() >= properties_->dictionary_pagesize_limit()) {
     WriteDictionaryPage();
     // Serialize the buffered Dictionary Indicies
     FlushBufferedDataPages();
     fallback_ = true;
     // Only PLAIN encoding is supported for fallback in V1
-    current_encoder_.reset(
-        new typename EncoderTraits<Type>::Plain(descr_, properties_->memory_pool()));
+    current_encoder_ = MakeEncoder(Type::type_num, Encoding::PLAIN, false, descr_,
+                                   properties_->memory_pool());
     encoding_ = Encoding::PLAIN;
   }
 }
@@ -575,8 +574,7 @@ template <typename Type>
 void TypedColumnWriter<Type>::WriteDictionaryPage() {
   // We static cast here because TypedEncoder<Type> is not considered to be a
   // subclass of DictEncoder so cannot use checked_cast
-  auto dict_encoder =
-      dynamic_cast<typename EncoderTraits<Type>::Dictionary*>(current_encoder_.get());
+  auto dict_encoder = dynamic_cast<DictEncoder*>(current_encoder_.get());
   DCHECK(dict_encoder);
   std::shared_ptr<ResizableBuffer> buffer =
       AllocateBuffer(properties_->memory_pool(), dict_encoder->dict_encoded_size());
@@ -842,7 +840,8 @@ void TypedColumnWriter<DType>::WriteBatchSpaced(
 
 template <typename DType>
 void TypedColumnWriter<DType>::WriteValues(int64_t num_values, const T* values) {
-  current_encoder_->Put(values, static_cast<int>(num_values));
+  checked_cast<ValueEncoderType*>(current_encoder_.get())
+      ->Put(values, static_cast<int>(num_values));
 }
 
 template <typename DType>
@@ -850,8 +849,8 @@ void TypedColumnWriter<DType>::WriteValuesSpaced(int64_t num_values,
                                                  const uint8_t* valid_bits,
                                                  int64_t valid_bits_offset,
                                                  const T* values) {
-  current_encoder_->PutSpaced(values, static_cast<int>(num_values), valid_bits,
-                              valid_bits_offset);
+  checked_cast<ValueEncoderType*>(current_encoder_.get())
+      ->PutSpaced(values, static_cast<int>(num_values), valid_bits, valid_bits_offset);
 }
 
 template class PARQUET_TEMPLATE_EXPORT TypedColumnWriter<BooleanType>;

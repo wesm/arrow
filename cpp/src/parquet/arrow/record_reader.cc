@@ -39,7 +39,6 @@
 #include "parquet/column_reader.h"
 #include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
-#include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/properties.h"

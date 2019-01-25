@@ -20,8 +20,9 @@
 #include <cstring>
 #include <type_traits>
 
+#include "arrow/util/logging.h"
+
 #include "parquet/decoding.h"
-#include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/statistics.h"
@@ -299,9 +300,9 @@ EncodedStatistics TypedRowGroupStatistics<DType>::Encode() {
 
 template <typename DType>
 void TypedRowGroupStatistics<DType>::PlainEncode(const T& src, std::string* dst) {
-  typename EncoderTraits<DType>::Plain encoder(descr(), pool_);
-  encoder.Put(&src, 1);
-  auto buffer = encoder.FlushValues();
+  auto encoder = MakeTypedEncoder<DType>(Encoding::PLAIN, false, descr(), pool_);
+  encoder->Put(&src, 1);
+  auto buffer = encoder->FlushValues();
   auto ptr = reinterpret_cast<const char*>(buffer->data());
   dst->assign(ptr, buffer->size());
 }

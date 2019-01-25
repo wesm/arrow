@@ -19,7 +19,6 @@
 
 #include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
-#include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
 #include "parquet/util/memory.h"
 
@@ -38,11 +37,12 @@ std::shared_ptr<ColumnDescriptor> Int64Schema(Repetition::type repetition) {
 
 static void BM_PlainEncodingBoolean(benchmark::State& state) {
   std::vector<bool> values(state.range(0), true);
-  PlainBooleanEncoder encoder(nullptr);
+  auto encoder = MakeEncoder(Type::BOOLEAN, Encoding::PLAIN);
+  auto typed_encoder = dynamic_cast<BooleanEncoder*>(encoder.get());
 
   while (state.KeepRunning()) {
-    encoder.Put(values, static_cast<int>(values.size()));
-    encoder.FlushValues();
+    typed_encoder->Put(values, static_cast<int>(values.size()));
+    typed_encoder->FlushValues();
   }
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(bool));
 }
@@ -52,9 +52,10 @@ BENCHMARK(BM_PlainEncodingBoolean)->Range(1024, 65536);
 static void BM_PlainDecodingBoolean(benchmark::State& state) {
   std::vector<bool> values(state.range(0), true);
   bool* output = new bool[state.range(0)];
-  PlainBooleanEncoder encoder(nullptr);
-  encoder.Put(values, static_cast<int>(values.size()));
-  std::shared_ptr<Buffer> buf = encoder.FlushValues();
+  auto encoder = MakeEncoder(Type::BOOLEAN, Encoding::PLAIN);
+  auto typed_encoder = dynamic_cast<BooleanEncoder*>(encoder.get());
+  typed_encoder->Put(values, static_cast<int>(values.size()));
+  std::shared_ptr<Buffer> buf = encoder->FlushValues();
 
   while (state.KeepRunning()) {
     PlainBooleanDecoder decoder(nullptr);
@@ -71,11 +72,12 @@ BENCHMARK(BM_PlainDecodingBoolean)->Range(1024, 65536);
 
 static void BM_PlainEncodingInt64(benchmark::State& state) {
   std::vector<int64_t> values(state.range(0), 64);
-  PlainInt64Encoder encoder(nullptr);
+  auto encoder = MakeTypedEncoder<Int64Type>(Encoding::PLAIN);
+  auto typed_encoder = static_cast<Int64Encoder*>(encoder.get());
 
   while (state.KeepRunning()) {
-    encoder.Put(values.data(), static_cast<int>(values.size()));
-    encoder.FlushValues();
+    typed_encoder->Put(values.data(), static_cast<int>(values.size()));
+    typed_encoder->FlushValues();
   }
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(int64_t));
 }
@@ -84,9 +86,10 @@ BENCHMARK(BM_PlainEncodingInt64)->Range(1024, 65536);
 
 static void BM_PlainDecodingInt64(benchmark::State& state) {
   std::vector<int64_t> values(state.range(0), 64);
-  PlainInt64Encoder encoder(nullptr);
-  encoder.Put(values.data(), static_cast<int>(values.size()));
-  std::shared_ptr<Buffer> buf = encoder.FlushValues();
+  auto encoder = MakeTypedEncoder<Int64Type>(Encoding::PLAIN);
+  auto typed_encoder = static_cast<Int64Encoder*>(encoder.get());
+  typed_encoder->Put(values.data(), static_cast<int>(values.size()));
+  std::shared_ptr<Buffer> buf = typed_encoder->FlushValues();
 
   while (state.KeepRunning()) {
     PlainInt64Decoder decoder(nullptr);
@@ -108,26 +111,27 @@ static void DecodeDict(std::vector<typename Type::c_type>& values,
   MemoryPool* allocator = default_memory_pool();
   std::shared_ptr<ColumnDescriptor> descr = Int64Schema(Repetition::REQUIRED);
 
-  typename EncoderTraits<Type>::Dictionary encoder(descr.get(), allocator);
-  for (int i = 0; i < num_values; ++i) {
-    encoder.Put(values[i]);
-  }
+  auto base_encoder =
+      MakeEncoder(Type::type_num, Encoding::PLAIN, true, descr.get(), allocator);
+  auto encoder = dynamic_cast<typename TypeTraits<Type>::Encoder*>(base_encoder.get());
+  auto dict_traits = dynamic_cast<DictEncoder*>(base_encoder.get());
+  encoder->Put(values.data(), num_values);
 
   std::shared_ptr<ResizableBuffer> dict_buffer =
-      AllocateBuffer(allocator, encoder.dict_encoded_size());
+      AllocateBuffer(allocator, dict_traits->dict_encoded_size());
 
   std::shared_ptr<ResizableBuffer> indices =
-      AllocateBuffer(allocator, encoder.EstimatedDataEncodedSize());
+      AllocateBuffer(allocator, encoder->EstimatedDataEncodedSize());
 
-  encoder.WriteDict(dict_buffer->mutable_data());
-  int actual_bytes =
-      encoder.WriteIndices(indices->mutable_data(), static_cast<int>(indices->size()));
+  dict_traits->WriteDict(dict_buffer->mutable_data());
+  int actual_bytes = dict_traits->WriteIndices(indices->mutable_data(),
+                                               static_cast<int>(indices->size()));
 
   PARQUET_THROW_NOT_OK(indices->Resize(actual_bytes));
 
   while (state.KeepRunning()) {
     auto dict_decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr.get());
-    dict_decoder->SetData(encoder.num_entries(), dict_buffer->data(),
+    dict_decoder->SetData(dict_traits->num_entries(), dict_buffer->data(),
                           static_cast<int>(dict_buffer->size()));
     typename DecoderTraits<Type>::Dictionary decoder(descr.get());
     decoder.SetDict(dict_decoder.get());

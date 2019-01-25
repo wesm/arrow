@@ -302,7 +302,8 @@ class PARQUET_TEMPLATE_CLASS_EXPORT TypedColumnWriter : public ColumnWriter {
   void WriteValuesSpaced(int64_t num_values, const uint8_t* valid_bits,
                          int64_t valid_bits_offset, const T* values);
 
-  std::unique_ptr<TypedEncoder<DType>> current_encoder_;
+  using ValueEncoderType = typename TypeTraits<DType>::Encoder;
+  std::unique_ptr<Encoder> current_encoder_;
 
   typedef TypedRowGroupStatistics<DType> TypedStats;
   std::unique_ptr<TypedStats> page_statistics_;

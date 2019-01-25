@@ -31,7 +31,6 @@
 #include "parquet/column_page.h"
 #include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
-#include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
 #include "parquet/properties.h"
 #include "parquet/thrift.h"

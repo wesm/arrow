@@ -26,7 +26,6 @@
 
 #include "parquet/decoding-internal.h"
 #include "parquet/decoding.h"
-#include "parquet/encoding-internal.h"
 #include "parquet/encoding.h"
 #include "parquet/schema.h"
 #include "parquet/types.h"
@@ -46,17 +45,18 @@ namespace test {
 TEST(VectorBooleanTest, TestEncodeDecode) {
   // PARQUET-454
   int nvalues = 10000;
-  int nbytes = static_cast<int>(BitUtil::BytesForBits(nvalues));
+  int nbytes = static_cast<int>(::arrow::BitUtil::BytesForBits(nvalues));
 
   // seed the prng so failure is deterministic
   vector<bool> draws = flip_coins_seed(nvalues, 0.5, 0);
 
-  PlainBooleanEncoder encoder(nullptr);
+  auto base_encoder = MakeEncoder(Type::BOOLEAN, Encoding::PLAIN);
+  auto encoder = dynamic_cast<BooleanEncoder*>(base_encoder.get());
+  encoder->Put(draws, nvalues);
+
   PlainBooleanDecoder decoder(nullptr);
 
-  encoder.Put(draws, nvalues);
-
-  std::shared_ptr<Buffer> encode_buffer = encoder.FlushValues();
+  std::shared_ptr<Buffer> encode_buffer = encoder->FlushValues();
   ASSERT_EQ(nbytes, encode_buffer->size());
 
   vector<uint8_t> decode_buffer(nbytes);
@@ -68,7 +68,7 @@ TEST(VectorBooleanTest, TestEncodeDecode) {
   ASSERT_EQ(nvalues, values_decoded);
 
   for (int i = 0; i < nvalues; ++i) {
-    ASSERT_EQ(draws[i], BitUtil::GetBit(decode_data, i)) << i;
+    ASSERT_EQ(draws[i], ::arrow::BitUtil::GetBit(decode_data, i)) << i;
   }
 }
 
@@ -253,22 +253,30 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
   static constexpr int TYPE = Type::type_num;
 
   void CheckRoundtrip() {
-    std::vector<uint8_t> valid_bits(BitUtil::BytesForBits(num_values_) + 1, 255);
-    typename EncoderTraits<Type>::Dictionary encoder(descr_.get());
+    std::vector<uint8_t> valid_bits(::arrow::BitUtil::BytesForBits(num_values_) + 1, 255);
 
-    ASSERT_NO_THROW(encoder.Put(draws_, num_values_));
-    dict_buffer_ = AllocateBuffer(default_memory_pool(), encoder.dict_encoded_size());
-    encoder.WriteDict(dict_buffer_->mutable_data());
-    std::shared_ptr<Buffer> indices = encoder.FlushValues();
+    auto base_encoder = MakeEncoder(Type::type_num, Encoding::PLAIN, true, descr_.get());
+    auto encoder = dynamic_cast<typename TypeTraits<Type>::Encoder*>(base_encoder.get());
+    auto dict_traits = dynamic_cast<DictEncoder*>(base_encoder.get());
 
-    typename EncoderTraits<Type>::Dictionary spaced_encoder(descr_.get());
+    ASSERT_NO_THROW(encoder->Put(draws_, num_values_));
+    dict_buffer_ =
+        AllocateBuffer(default_memory_pool(), dict_traits->dict_encoded_size());
+    dict_traits->WriteDict(dict_buffer_->mutable_data());
+    std::shared_ptr<Buffer> indices = encoder->FlushValues();
+
+    auto base_spaced_encoder =
+        MakeEncoder(Type::type_num, Encoding::PLAIN, true, descr_.get());
+    auto spaced_encoder =
+        dynamic_cast<typename TypeTraits<Type>::Encoder*>(base_spaced_encoder.get());
+
     // PutSpaced should lead to the same results
-    ASSERT_NO_THROW(spaced_encoder.PutSpaced(draws_, num_values_, valid_bits.data(), 0));
-    std::shared_ptr<Buffer> indices_from_spaced = spaced_encoder.FlushValues();
+    ASSERT_NO_THROW(spaced_encoder->PutSpaced(draws_, num_values_, valid_bits.data(), 0));
+    std::shared_ptr<Buffer> indices_from_spaced = spaced_encoder->FlushValues();
     ASSERT_TRUE(indices_from_spaced->Equals(*indices));
 
     auto dict_decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr_.get());
-    dict_decoder->SetData(encoder.num_entries(), dict_buffer_->data(),
+    dict_decoder->SetData(dict_traits->num_entries(), dict_buffer_->data(),
                           static_cast<int>(dict_buffer_->size()));
 
     typename DecoderTraits<Type>::Dictionary decoder(descr_.get());

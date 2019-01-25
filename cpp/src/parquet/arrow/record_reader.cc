@@ -707,7 +707,7 @@ inline void TypedRecordReader<DType>::ConfigureDictionary(const DictionaryPage* 
 
   if (page->encoding() == Encoding::PLAIN_DICTIONARY ||
       page->encoding() == Encoding::PLAIN) {
-    typename DecoderTraits<DType>::PlainDecoder dictionary(descr_);
+    typename DecoderTraits<DType>::Plain dictionary(descr_);
     dictionary.SetData(page->num_values(), page->data(), page->size());
 
     // The dictionary is fully decoded during DictionaryDecoder::Init, so the
@@ -717,7 +717,7 @@ inline void TypedRecordReader<DType>::ConfigureDictionary(const DictionaryPage* 
     // dictionary makes sense and whether performance can be improved
 
     auto decoder =
-        std::make_shared<typename DecoderTraits<DType>::DictDecoder>(descr_, pool_);
+        std::make_shared<typename DecoderTraits<DType>::Dictionary>(descr_, pool_);
     decoder->SetDict(&dictionary);
     decoders_[encoding] = decoder;
   } else {
@@ -798,7 +798,7 @@ bool TypedRecordReader<DType>::ReadNewPage() {
         switch (encoding) {
           case Encoding::PLAIN: {
             std::shared_ptr<DecoderType> decoder(
-                new typename DecoderTraits<DType>::PlainDecoder(descr_));
+                new typename DecoderTraits<DType>::Plain(descr_));
             decoders_[static_cast<int>(encoding)] = decoder;
             current_decoder_ = decoder.get();
             break;

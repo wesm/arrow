@@ -132,7 +132,7 @@ class DataPageBuilder {
 
   void AppendValues(const ColumnDescriptor* d, const vector<T>& values,
                     Encoding::type encoding = Encoding::PLAIN) {
-    typename EncoderTraits<Type>::PlainEncoder encoder(d);
+    typename EncoderTraits<Type>::Plain encoder(d);
     encoder.Put(&values[0], static_cast<int>(values.size()));
     std::shared_ptr<Buffer> values_sink = encoder.FlushValues();
     sink_->Write(values_sink->data(), values_sink->size());
@@ -242,7 +242,7 @@ class DictionaryPageBuilder {
  public:
   typedef typename TYPE::c_type TC;
   static constexpr int TN = TYPE::type_num;
-  using DictEncoderType = typename EncoderTraits<TYPE>::DictEncoder;
+  using DictEncoderType = typename EncoderTraits<TYPE>::Dictionary;
 
   // This class writes data and metadata to the passed inputs
   explicit DictionaryPageBuilder(const ColumnDescriptor* d)

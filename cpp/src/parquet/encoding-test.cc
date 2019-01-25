@@ -254,14 +254,14 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
 
   void CheckRoundtrip() {
     std::vector<uint8_t> valid_bits(BitUtil::BytesForBits(num_values_) + 1, 255);
-    typename EncoderTraits<Type>::DictEncoder encoder(descr_.get());
+    typename EncoderTraits<Type>::Dictionary encoder(descr_.get());
 
     ASSERT_NO_THROW(encoder.Put(draws_, num_values_));
     dict_buffer_ = AllocateBuffer(default_memory_pool(), encoder.dict_encoded_size());
     encoder.WriteDict(dict_buffer_->mutable_data());
     std::shared_ptr<Buffer> indices = encoder.FlushValues();
 
-    typename EncoderTraits<Type>::DictEncoder spaced_encoder(descr_.get());
+    typename EncoderTraits<Type>::Dictionary spaced_encoder(descr_.get());
     // PutSpaced should lead to the same results
     ASSERT_NO_THROW(spaced_encoder.PutSpaced(draws_, num_values_, valid_bits.data(), 0));
     std::shared_ptr<Buffer> indices_from_spaced = spaced_encoder.FlushValues();
@@ -271,7 +271,7 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
     dict_decoder->SetData(encoder.num_entries(), dict_buffer_->data(),
                           static_cast<int>(dict_buffer_->size()));
 
-    typename DecoderTraits<Type>::DictDecoder decoder(descr_.get());
+    typename DecoderTraits<Type>::Dictionary decoder(descr_.get());
     decoder.SetDict(dict_decoder.get());
 
     decoder.SetData(num_values_, indices->data(), static_cast<int>(indices->size()));

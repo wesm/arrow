@@ -299,7 +299,7 @@ EncodedStatistics TypedRowGroupStatistics<DType>::Encode() {
 
 template <typename DType>
 void TypedRowGroupStatistics<DType>::PlainEncode(const T& src, std::string* dst) {
-  typename EncoderTraits<DType>::PlainEncoder encoder(descr(), pool_);
+  typename EncoderTraits<DType>::Plain encoder(descr(), pool_);
   encoder.Put(&src, 1);
   auto buffer = encoder.FlushValues();
   auto ptr = reinterpret_cast<const char*>(buffer->data());

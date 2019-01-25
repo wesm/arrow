@@ -565,8 +565,8 @@ void TypedColumnWriter<Type>::CheckDictionarySizeLimit() {
     FlushBufferedDataPages();
     fallback_ = true;
     // Only PLAIN encoding is supported for fallback in V1
-    current_encoder_.reset(new typename EncoderTraits<Type>::PlainEncoder(
-        descr_, properties_->memory_pool()));
+    current_encoder_.reset(
+        new typename EncoderTraits<Type>::Plain(descr_, properties_->memory_pool()));
     encoding_ = Encoding::PLAIN;
   }
 }
@@ -576,7 +576,7 @@ void TypedColumnWriter<Type>::WriteDictionaryPage() {
   // We static cast here because TypedEncoder<Type> is not considered to be a
   // subclass of DictEncoder so cannot use checked_cast
   auto dict_encoder =
-      dynamic_cast<typename EncoderTraits<Type>::DictEncoder*>(current_encoder_.get());
+      dynamic_cast<typename EncoderTraits<Type>::Dictionary*>(current_encoder_.get());
   DCHECK(dict_encoder);
   std::shared_ptr<ResizableBuffer> buffer =
       AllocateBuffer(properties_->memory_pool(), dict_encoder->dict_encoded_size());

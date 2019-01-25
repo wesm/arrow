@@ -62,7 +62,6 @@ class PlainEncoder : public TypedEncoder<DType> {
   std::unique_ptr<InMemoryOutputStream> values_sink_;
 };
 
-
 template <typename DType>
 PlainEncoder<DType>::PlainEncoder(const ColumnDescriptor* descr,
                                   ::arrow::MemoryPool* pool)
@@ -159,7 +158,6 @@ class PARQUET_EXPORT PlainBooleanEncoder : public TypedEncoder<BooleanType> {
   void PutImpl(const SequenceType& src, int num_values);
 };
 
-
 template <typename SequenceType>
 void PlainBooleanEncoder::PutImpl(const SequenceType& src, int num_values) {
   int bit_offset = 0;
@@ -251,8 +249,8 @@ class PARQUET_EXPORT DictEncoder {
 /// written out with the current dictionary size. More values can then be added to
 /// the encoder, including new dictionary entries.
 template <typename DType>
-class PARQUET_TEMPLATE_CLASS_EXPORT DictEncoderImpl
-    : public TypedEncoder<DType>, public DictEncoder {
+class PARQUET_TEMPLATE_CLASS_EXPORT DictEncoderImpl : public TypedEncoder<DType>,
+                                                      public DictEncoder {
   using MemoTableType = typename DictEncoderTraits<DType>::MemoTableType;
 
  public:
@@ -456,53 +454,53 @@ struct EncoderTraits {};
 
 template <>
 struct EncoderTraits<BooleanType> {
-  using PlainEncoder = PlainBooleanEncoder;
+  using Plain = PlainBooleanEncoder;
 
   // XXX(wesm): This is instantiated but never used in TypedColumnWriter<T>,
   // try to remove later
-  using DictEncoder = DictEncoderImpl<BooleanType>;
+  using Dictionary = DictEncoderImpl<BooleanType>;
 };
 
 template <>
 struct EncoderTraits<Int32Type> {
-  using PlainEncoder = PlainInt32Encoder;
-  using DictEncoder = DictInt32Encoder;
+  using Plain = PlainInt32Encoder;
+  using Dictionary = DictInt32Encoder;
 };
 
 template <>
 struct EncoderTraits<Int64Type> {
-  using PlainEncoder = PlainInt64Encoder;
-  using DictEncoder = DictInt64Encoder;
+  using Plain = PlainInt64Encoder;
+  using Dictionary = DictInt64Encoder;
 };
 
 template <>
 struct EncoderTraits<Int96Type> {
-  using PlainEncoder = PlainInt96Encoder;
-  using DictEncoder = DictInt96Encoder;
+  using Plain = PlainInt96Encoder;
+  using Dictionary = DictInt96Encoder;
 };
 
 template <>
 struct EncoderTraits<FloatType> {
-  using PlainEncoder = PlainFloatEncoder;
-  using DictEncoder = DictFloatEncoder;
+  using Plain = PlainFloatEncoder;
+  using Dictionary = DictFloatEncoder;
 };
 
 template <>
 struct EncoderTraits<DoubleType> {
-  using PlainEncoder = PlainDoubleEncoder;
-  using DictEncoder = DictDoubleEncoder;
+  using Plain = PlainDoubleEncoder;
+  using Dictionary = DictDoubleEncoder;
 };
 
 template <>
 struct EncoderTraits<ByteArrayType> {
-  using PlainEncoder = PlainByteArrayEncoder;
-  using DictEncoder = DictByteArrayEncoder;
+  using Plain = PlainByteArrayEncoder;
+  using Dictionary = DictByteArrayEncoder;
 };
 
 template <>
 struct EncoderTraits<FLBAType> {
-  using PlainEncoder = PlainFLBAEncoder;
-  using DictEncoder = DictFLBAEncoder;
+  using Plain = PlainFLBAEncoder;
+  using Dictionary = DictFLBAEncoder;
 };
 
 }  // namespace parquet

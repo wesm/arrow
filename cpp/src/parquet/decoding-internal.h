@@ -520,50 +520,50 @@ struct DecoderTraits {};
 
 template <>
 struct DecoderTraits<BooleanType> {
-  using PlainDecoder = PlainBooleanDecoder;
-  using DictDecoder = DictDecoder<BooleanType>;
+  using Plain = PlainBooleanDecoder;
+  using Dictionary = DictBooleanDecoder;
 };
 
 template <>
 struct DecoderTraits<Int32Type> {
-  using PlainDecoder = PlainInt32Decoder;
-  using DictDecoder = DictInt32Decoder;
+  using Plain = PlainInt32Decoder;
+  using Dictionary = DictInt32Decoder;
 };
 
 template <>
 struct DecoderTraits<Int64Type> {
-  using PlainDecoder = PlainInt64Decoder;
-  using DictDecoder = DictInt64Decoder;
+  using Plain = PlainInt64Decoder;
+  using Dictionary = DictInt64Decoder;
 };
 
 template <>
 struct DecoderTraits<Int96Type> {
-  using PlainDecoder = PlainInt96Decoder;
-  using DictDecoder = DictInt96Decoder;
+  using Plain = PlainInt96Decoder;
+  using Dictionary = DictInt96Decoder;
 };
 
 template <>
 struct DecoderTraits<FloatType> {
-  using PlainDecoder = PlainFloatDecoder;
-  using DictDecoder = DictFloatDecoder;
+  using Plain = PlainFloatDecoder;
+  using Dictionary = DictFloatDecoder;
 };
 
 template <>
 struct DecoderTraits<DoubleType> {
-  using PlainDecoder = PlainDoubleDecoder;
-  using DictDecoder = DictDoubleDecoder;
+  using Plain = PlainDoubleDecoder;
+  using Dictionary = DictDoubleDecoder;
 };
 
 template <>
 struct DecoderTraits<ByteArrayType> {
-  using PlainDecoder = PlainByteArrayDecoder;
-  using DictDecoder = DictByteArrayDecoder;
+  using Plain = PlainByteArrayDecoder;
+  using Dictionary = DictByteArrayDecoder;
 };
 
 template <>
 struct DecoderTraits<FLBAType> {
-  using PlainDecoder = PlainFLBADecoder;
-  using DictDecoder = DictFLBADecoder;
+  using Plain = PlainFLBADecoder;
+  using Dictionary = DictFLBADecoder;
 };
 
 }  // namespace parquet

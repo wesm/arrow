@@ -303,7 +303,7 @@ void TypedColumnReader<DType>::ConfigureDictionary(const DictionaryPage* page) {
     // dictionary makes sense and whether performance can be improved
 
     auto decoder = std::unique_ptr<DictDecoder<DType>>(
-        new typename DecoderTraits<DType>::DictDecoder(descr_, pool_));
+        new typename DecoderTraits<DType>::Dictionary(descr_, pool_));
     decoder->SetDict(dictionary.get());
     decoders_[encoding] = std::move(decoder);
   } else {

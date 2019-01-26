@@ -56,10 +56,10 @@ static void BM_PlainDecodingBoolean(benchmark::State& state) {
   std::shared_ptr<Buffer> buf = encoder->FlushValues();
 
   while (state.KeepRunning()) {
-    PlainBooleanDecoder decoder(nullptr);
-    decoder.SetData(static_cast<int>(values.size()), buf->data(),
+    auto decoder = MakeTypedDecoder<BooleanType>(Encoding::PLAIN);
+    decoder->SetData(static_cast<int>(values.size()), buf->data(),
                     static_cast<int>(buf->size()));
-    decoder.Decode(output, static_cast<int>(values.size()));
+    decoder->Decode(output, static_cast<int>(values.size()));
   }
 
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(bool));
@@ -71,11 +71,9 @@ BENCHMARK(BM_PlainDecodingBoolean)->Range(1024, 65536);
 static void BM_PlainEncodingInt64(benchmark::State& state) {
   std::vector<int64_t> values(state.range(0), 64);
   auto encoder = MakeTypedEncoder<Int64Type>(Encoding::PLAIN);
-  auto typed_encoder = static_cast<Int64Encoder*>(encoder.get());
-
   while (state.KeepRunning()) {
-    typed_encoder->Put(values.data(), static_cast<int>(values.size()));
-    typed_encoder->FlushValues();
+    encoder->Put(values.data(), static_cast<int>(values.size()));
+    encoder->FlushValues();
   }
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(int64_t));
 }
@@ -85,15 +83,14 @@ BENCHMARK(BM_PlainEncodingInt64)->Range(1024, 65536);
 static void BM_PlainDecodingInt64(benchmark::State& state) {
   std::vector<int64_t> values(state.range(0), 64);
   auto encoder = MakeTypedEncoder<Int64Type>(Encoding::PLAIN);
-  auto typed_encoder = static_cast<Int64Encoder*>(encoder.get());
-  typed_encoder->Put(values.data(), static_cast<int>(values.size()));
-  std::shared_ptr<Buffer> buf = typed_encoder->FlushValues();
+  encoder->Put(values.data(), static_cast<int>(values.size()));
+  std::shared_ptr<Buffer> buf = encoder->FlushValues();
 
   while (state.KeepRunning()) {
-    PlainInt64Decoder decoder(nullptr);
-    decoder.SetData(static_cast<int>(values.size()), buf->data(),
+    auto decoder = MakeTypedDecoder<Int64Type>(Encoding::PLAIN);
+    decoder->SetData(static_cast<int>(values.size()), buf->data(),
                     static_cast<int>(buf->size()));
-    decoder.Decode(values.data(), static_cast<int>(values.size()));
+    decoder->Decode(values.data(), static_cast<int>(values.size()));
   }
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(int64_t));
 }

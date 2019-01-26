@@ -808,13 +808,15 @@ inline void DictDecoderImpl<FLBAType>::SetDict(TypedDecoder<FLBAType>* dictionar
   }
 }
 
-class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType> {
+class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
+                             virtual public ByteArrayDecoder {
  public:
   using BASE = DictDecoderImpl<ByteArrayType>;
   using BASE::DictDecoderImpl;
 };
 
-class DictFLBADecoder : public DictDecoderImpl<FLBAType> {
+class DictFLBADecoder : public DictDecoderImpl<FLBAType>,
+                        virtual public FLBADecoder {
  public:
   using BASE = DictDecoderImpl<FLBAType>;
   using BASE::DictDecoderImpl;

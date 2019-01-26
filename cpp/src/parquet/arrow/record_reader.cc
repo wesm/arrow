@@ -48,6 +48,7 @@ using arrow::MemoryPool;
 namespace parquet {
 namespace internal {
 
+using ::arrow::internal::checked_cast;
 namespace BitUtil = ::arrow::BitUtil;
 
 template <typename DType>
@@ -715,13 +716,14 @@ inline void TypedRecordReader<DType>::ConfigureDictionary(const DictionaryPage* 
 
     std::unique_ptr<DictDecoder<DType>> decoder = MakeDictDecoder<DType>(descr_, pool_);
     decoder->SetDict(dictionary.get());
-    decoders_[encoding] =
-        std::unique_ptr<DecoderType>(dynamic_cast<DecoderType*>(decoder.release()));
+    decoders_[encoding] = std::unique_ptr<DecoderType>(
+        checked_cast<DecoderType*>(decoder.release()));
   } else {
     ParquetException::NYI("only plain dictionary encoding has been implemented");
   }
 
   current_decoder_ = decoders_[encoding].get();
+  DCHECK(current_decoder_);
 }
 
 template <typename DType>
@@ -787,6 +789,7 @@ bool TypedRecordReader<DType>::ReadNewPage() {
 
       auto it = decoders_.find(static_cast<int>(encoding));
       if (it != decoders_.end()) {
+        DCHECK(it->second.get() != nullptr);
         if (encoding == Encoding::RLE_DICTIONARY) {
           DCHECK(current_decoder_->encoding() == Encoding::RLE_DICTIONARY);
         }
@@ -797,6 +800,7 @@ bool TypedRecordReader<DType>::ReadNewPage() {
             auto decoder = MakeTypedDecoder<DType>(Encoding::PLAIN, descr_);
             current_decoder_ = decoder.get();
             decoders_[static_cast<int>(encoding)] = std::move(decoder);
+            break;
           }
           case Encoding::RLE_DICTIONARY:
             throw ParquetException("Dictionary page must be before data page.");

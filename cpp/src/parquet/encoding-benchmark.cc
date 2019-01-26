@@ -17,8 +17,6 @@
 
 #include "benchmark/benchmark.h"
 
-#include "parquet/decoding-internal.h"
-#include "parquet/decoding.h"
 #include "parquet/encoding.h"
 #include "parquet/util/memory.h"
 
@@ -133,10 +131,11 @@ static void DecodeDict(std::vector<typename Type::c_type>& values,
     auto dict_decoder = MakeTypedDecoder<Type>(Encoding::PLAIN, descr.get());
     dict_decoder->SetData(dict_traits->num_entries(), dict_buffer->data(),
                           static_cast<int>(dict_buffer->size()));
-    typename DecoderTraits<Type>::Dictionary decoder(descr.get());
-    decoder.SetDict(dict_decoder.get());
-    decoder.SetData(num_values, indices->data(), static_cast<int>(indices->size()));
-    decoder.Decode(values.data(), num_values);
+
+    auto decoder = MakeDictDecoder<Type>(descr.get());
+    decoder->SetDict(dict_decoder.get());
+    decoder->SetData(num_values, indices->data(), static_cast<int>(indices->size()));
+    decoder->Decode(values.data(), num_values);
   }
 
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(T));

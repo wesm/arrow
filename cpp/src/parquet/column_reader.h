@@ -34,7 +34,6 @@
 #include <arrow/util/bit-util.h>
 
 #include "parquet/column_page.h"
-#include "parquet/decoding.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/schema.h"

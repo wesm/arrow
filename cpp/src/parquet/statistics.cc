@@ -22,7 +22,6 @@
 
 #include "arrow/util/logging.h"
 
-#include "parquet/decoding.h"
 #include "parquet/encoding.h"
 #include "parquet/exception.h"
 #include "parquet/statistics.h"

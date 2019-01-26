@@ -557,7 +557,9 @@ TypedColumnWriter<Type>::TypedColumnWriter(ColumnChunkMetaDataBuilder* metadata,
 // Fallback to PLAIN if dictionary page limit is reached.
 template <typename Type>
 void TypedColumnWriter<Type>::CheckDictionarySizeLimit() {
-  auto dict_encoder = checked_cast<DictEncoder*>(current_encoder_.get());
+  // We static cast here because TypedEncoder<Type> is not considered to be a
+  // subclass of DictEncoder so cannot use checked_cast
+  auto dict_encoder = dynamic_cast<DictEncoder*>(current_encoder_.get());
   if (dict_encoder->dict_encoded_size() >= properties_->dictionary_pagesize_limit()) {
     WriteDictionaryPage();
     // Serialize the buffered Dictionary Indicies
@@ -840,7 +842,7 @@ void TypedColumnWriter<DType>::WriteBatchSpaced(
 
 template <typename DType>
 void TypedColumnWriter<DType>::WriteValues(int64_t num_values, const T* values) {
-  checked_cast<ValueEncoderType*>(current_encoder_.get())
+  dynamic_cast<ValueEncoderType*>(current_encoder_.get())
       ->Put(values, static_cast<int>(num_values));
 }
 
@@ -849,7 +851,7 @@ void TypedColumnWriter<DType>::WriteValuesSpaced(int64_t num_values,
                                                  const uint8_t* valid_bits,
                                                  int64_t valid_bits_offset,
                                                  const T* values) {
-  checked_cast<ValueEncoderType*>(current_encoder_.get())
+  dynamic_cast<ValueEncoderType*>(current_encoder_.get())
       ->PutSpaced(values, static_cast<int>(num_values), valid_bits, valid_bits_offset);
 }
 

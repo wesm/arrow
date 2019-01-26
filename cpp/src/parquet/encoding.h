@@ -36,7 +36,7 @@ namespace parquet {
 class ColumnDescriptor;
 
 // Untyped base for all encoders
-class PARQUET_EXPORT Encoder {
+class Encoder {
  public:
   virtual ~Encoder() = default;
 
@@ -111,22 +111,71 @@ class PARQUET_EXPORT DictEncoder {
   int dict_encoded_size_;
 };
 
-PARQUET_EXPORT
-std::unique_ptr<Encoder> MakeEncoder(
-    Type::type type_num, Encoding::type encoding, bool use_dictionary = false,
-    const ColumnDescriptor* descr = NULLPTR,
-    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
+// ----------------------------------------------------------------------
+// Value decoding
+
+class PARQUET_EXPORT Decoder {
+ public:
+  virtual ~Decoder() = default;
+
+  // Sets the data for a new page. This will be called multiple times on the same
+  // decoder and should reset all internal state.
+  virtual void SetData(int num_values, const uint8_t* data, int len) = 0;
+
+  // Returns the number of values left (for the last call to SetData()). This is
+  // the number of values left in this page.
+  virtual int values_left() const = 0;
+  virtual Encoding::type encoding() const = 0;
+};
 
 template <typename DType>
-std::unique_ptr<TypedEncoder<DType>> MakeTypedEncoder(
-    Encoding::type encoding, bool use_dictionary = false,
-    const ColumnDescriptor* descr = NULLPTR,
-    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool()) {
-  std::unique_ptr<Encoder> base =
-      MakeEncoder(DType::type_num, encoding, use_dictionary, descr, pool);
-  return std::unique_ptr<TypedEncoder<DType>>(
-      ::arrow::internal::checked_cast<TypedEncoder<DType>*>(base.release()));
-}
+class TypedDecoder : virtual public Decoder {
+ public:
+  using T = typename DType::c_type;
+
+  // Subclasses should override the ones they support. In each of these functions,
+  // the decoder would decode put to 'max_values', storing the result in 'buffer'.
+  // The function returns the number of values decoded, which should be max_values
+  // except for end of the current data page.
+  virtual int Decode(T* buffer, int max_values) = 0;
+
+  // Decode the values in this data page but leave spaces for null entries.
+  //
+  // num_values is the size of the def_levels and buffer arrays including the number of
+  // null values.
+  virtual int DecodeSpaced(T* buffer, int num_values, int null_count,
+                           const uint8_t* valid_bits, int64_t valid_bits_offset) {
+    int values_to_read = num_values - null_count;
+    int values_read = Decode(buffer, values_to_read);
+    if (values_read != values_to_read) {
+      throw ParquetException("Number of values / definition_levels read did not match");
+    }
+
+    // Depending on the number of nulls, some of the value slots in buffer may
+    // be uninitialized, and this will cause valgrind warnings / potentially UB
+    memset(static_cast<void*>(buffer + values_read), 0,
+           (num_values - values_read) * sizeof(T));
+
+    // Add spacing for null entries. As we have filled the buffer from the front,
+    // we need to add the spacing from the back.
+    int values_to_move = values_read;
+    for (int i = num_values - 1; i >= 0; i--) {
+      if (::arrow::BitUtil::GetBit(valid_bits, valid_bits_offset + i)) {
+        buffer[i] = buffer[--values_to_move];
+      }
+    }
+    return num_values;
+  }
+};
+
+template <typename DType>
+class PARQUET_EXPORT DictDecoder : virtual public TypedDecoder<DType> {
+ public:
+  virtual void SetDict(TypedDecoder<DType>* dictionary) = 0;
+};
+
+// ----------------------------------------------------------------------
+// TypedEncoder specializations, traits, and factory functions
 
 class BooleanEncoder : virtual public TypedEncoder<BooleanType> {
  public:
@@ -142,47 +191,116 @@ using DoubleEncoder = TypedEncoder<DoubleType>;
 class ByteArrayEncoder : virtual public TypedEncoder<ByteArrayType> {};
 class FLBAEncoder : virtual public TypedEncoder<FLBAType> {};
 
+class BooleanDecoder : virtual public TypedDecoder<BooleanType> {
+ public:
+  using TypedDecoder<BooleanType>::Decode;
+  virtual int Decode(uint8_t* buffer, int max_values) = 0;
+};
+
+using Int32Decoder = TypedDecoder<Int32Type>;
+using Int64Decoder = TypedDecoder<Int64Type>;
+using Int96Decoder = TypedDecoder<Int96Type>;
+using FloatDecoder = TypedDecoder<FloatType>;
+using DoubleDecoder = TypedDecoder<DoubleType>;
+class ByteArrayDecoder : virtual public TypedDecoder<ByteArrayType> {};
+class FLBADecoder : virtual public TypedDecoder<FLBAType> {};
+
 template <typename T>
 struct TypeTraits {};
 
 template <>
 struct TypeTraits<BooleanType> {
   using Encoder = BooleanEncoder;
+  using Decoder = BooleanDecoder;
 };
 
 template <>
 struct TypeTraits<Int32Type> {
   using Encoder = Int32Encoder;
+  using Decoder = Int32Decoder;
 };
 
 template <>
 struct TypeTraits<Int64Type> {
   using Encoder = Int64Encoder;
+  using Decoder = Int64Decoder;
 };
 
 template <>
 struct TypeTraits<Int96Type> {
   using Encoder = Int96Encoder;
+  using Decoder = Int96Decoder;
 };
 
 template <>
 struct TypeTraits<FloatType> {
   using Encoder = FloatEncoder;
+  using Decoder = FloatDecoder;
 };
 
 template <>
 struct TypeTraits<DoubleType> {
   using Encoder = DoubleEncoder;
+  using Decoder = DoubleDecoder;
 };
 
 template <>
 struct TypeTraits<ByteArrayType> {
   using Encoder = ByteArrayEncoder;
+  using Decoder = ByteArrayDecoder;
 };
 
 template <>
 struct TypeTraits<FLBAType> {
   using Encoder = FLBAEncoder;
+  using Decoder = FLBADecoder;
 };
+
+PARQUET_EXPORT
+std::unique_ptr<Encoder> MakeEncoder(
+    Type::type type_num, Encoding::type encoding, bool use_dictionary = false,
+    const ColumnDescriptor* descr = NULLPTR,
+    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool());
+
+template <typename DType>
+std::unique_ptr<typename TypeTraits<DType>::Encoder> MakeTypedEncoder(
+    Encoding::type encoding, bool use_dictionary = false,
+    const ColumnDescriptor* descr = NULLPTR,
+    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool()) {
+  using OutType = typename TypeTraits<DType>::Encoder;
+  std::unique_ptr<Encoder> base =
+      MakeEncoder(DType::type_num, encoding, use_dictionary, descr, pool);
+  return std::unique_ptr<OutType>(dynamic_cast<OutType*>(base.release()));
+}
+
+PARQUET_EXPORT
+std::unique_ptr<Decoder> MakeDecoder(Type::type type_num, Encoding::type encoding,
+                                     const ColumnDescriptor* descr = NULLPTR);
+
+namespace detail {
+
+PARQUET_EXPORT
+std::unique_ptr<Decoder> MakeDictDecoder(Type::type type_num,
+                                         const ColumnDescriptor* descr,
+                                         ::arrow::MemoryPool* pool);
+
+}  // namespace detail
+
+template <typename DType>
+std::unique_ptr<DictDecoder<DType>> MakeDictDecoder(
+    const ColumnDescriptor* descr,
+    ::arrow::MemoryPool* pool = ::arrow::default_memory_pool()) {
+  using OutType = DictDecoder<DType>;
+  auto decoder = detail::MakeDictDecoder(DType::type_num, descr, pool);
+  return std::unique_ptr<OutType>(dynamic_cast<OutType*>(decoder.release()));
+}
+
+template <typename DType>
+std::unique_ptr<typename TypeTraits<DType>::Decoder> MakeTypedDecoder(
+    Encoding::type encoding, const ColumnDescriptor* descr = NULLPTR) {
+  using OutType = typename TypeTraits<DType>::Decoder;
+  std::unique_ptr<Decoder> base = MakeDecoder(DType::type_num, encoding, descr);
+  return std::unique_ptr<OutType>(dynamic_cast<OutType*>(base.release()));
+}
 
 }  // namespace parquet

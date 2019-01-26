@@ -80,9 +80,13 @@ class RecordReader::RecordReaderImpl {
         null_count_(0),
         levels_written_(0),
         levels_position_(0),
-        levels_capacity_(0) {
+        levels_capacity_(0),
+        uses_values_(!(descr->physical_type() == Type::BYTE_ARRAY ||
+                       descr->physical_type() == Type::FIXED_LEN_BYTE_ARRAY)) {
     nullable_values_ = internal::HasSpacedValues(descr);
-    values_ = AllocateBuffer(pool);
+    if (uses_values_) {
+      values_ = AllocateBuffer(pool);
+    }
     valid_bits_ = AllocateBuffer(pool);
     def_levels_ = AllocateBuffer(pool);
     rep_levels_ = AllocateBuffer(pool);
@@ -210,9 +214,13 @@ class RecordReader::RecordReaderImpl {
   bool nullable_values() const { return nullable_values_; }
 
   std::shared_ptr<ResizableBuffer> ReleaseValues() {
-    auto result = values_;
-    values_ = AllocateBuffer(pool_);
-    return result;
+    if (uses_values_) {
+      auto result = values_;
+      values_ = AllocateBuffer(pool_);
+      return result;
+    } else {
+      return nullptr;
+    }
   }
 
   std::shared_ptr<ResizableBuffer> ReleaseIsValid() {
@@ -324,7 +332,13 @@ class RecordReader::RecordReaderImpl {
       }
 
       int type_size = GetTypeByteSize(descr_->physical_type());
-      PARQUET_THROW_NOT_OK(values_->Resize(new_values_capacity * type_size, false));
+
+      // XXX(wesm): A hack to avoid memory allocation when reading directly
+      // into builder classes
+      if (uses_values_) {
+        PARQUET_THROW_NOT_OK(values_->Resize(new_values_capacity * type_size, false));
+      }
+
       values_capacity_ = new_values_capacity;
     }
     if (nullable_values_) {
@@ -371,7 +385,9 @@ class RecordReader::RecordReaderImpl {
   void ResetValues() {
     if (values_written_ > 0) {
       // Resize to 0, but do not shrink to fit
-      PARQUET_THROW_NOT_OK(values_->Resize(0, false));
+      if (uses_values_) {
+        PARQUET_THROW_NOT_OK(values_->Resize(0, false));
+      }
       PARQUET_THROW_NOT_OK(valid_bits_->Resize(0, false));
       values_written_ = 0;
       values_capacity_ = 0;
@@ -427,6 +443,7 @@ class RecordReader::RecordReaderImpl {
   int64_t levels_capacity_;
 
   std::shared_ptr<::arrow::ResizableBuffer> values_;
+  bool uses_values_;
 
   template <typename T>
   T* ValuesHead() {
@@ -620,15 +637,9 @@ template <>
 
 template <>
 inline void TypedRecordReader<ByteArrayType>::ReadValuesDense(int64_t values_to_read) {
-  auto values = ValuesHead<ByteArray>();
-  int64_t num_decoded =
-      current_decoder_->Decode(values, static_cast<int>(values_to_read));
+  int64_t num_decoded = current_decoder_->DecodeArrowNonNull(
+      static_cast<int>(values_to_read), builder_.get());
   DCHECK_EQ(num_decoded, values_to_read);
-
-  for (int64_t i = 0; i < num_decoded; i++) {
-    PARQUET_THROW_NOT_OK(
-        builder_->Append(values[i].ptr, static_cast<int32_t>(values[i].len)));
-  }
   ResetValues();
 }
 
@@ -650,21 +661,11 @@ inline void TypedRecordReader<ByteArrayType>::ReadValuesSpaced(int64_t values_to
                                                                int64_t null_count) {
   uint8_t* valid_bits = valid_bits_->mutable_data();
   const int64_t valid_bits_offset = values_written_;
-  auto values = ValuesHead<ByteArray>();
 
-  int64_t num_decoded = current_decoder_->DecodeSpaced(
-      values, static_cast<int>(values_to_read), static_cast<int>(null_count), valid_bits,
-      valid_bits_offset);
+  int64_t num_decoded = current_decoder_->DecodeArrow(
+      static_cast<int>(values_to_read), static_cast<int>(null_count), valid_bits,
+      valid_bits_offset, builder_.get());
   DCHECK_EQ(num_decoded, values_to_read);
-
-  for (int64_t i = 0; i < num_decoded; i++) {
-    if (::arrow::BitUtil::GetBit(valid_bits, valid_bits_offset + i)) {
-      PARQUET_THROW_NOT_OK(
-          builder_->Append(values[i].ptr, static_cast<int32_t>(values[i].len)));
-    } else {
-      PARQUET_THROW_NOT_OK(builder_->AppendNull());
-    }
-  }
   ResetValues();
 }
 

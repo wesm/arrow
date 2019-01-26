@@ -31,6 +31,17 @@
 #include "parquet/types.h"
 #include "parquet/util/memory.h"
 
+namespace arrow {
+
+class FixedSizeBinaryBuilder;
+
+namespace internal {
+
+class ChunkedBinaryBuilder;
+
+}  // namespace internal
+}  // namespace arrow
+
 namespace parquet {
 
 class ColumnDescriptor;
@@ -191,8 +202,32 @@ using Int64Decoder = TypedDecoder<Int64Type>;
 using Int96Decoder = TypedDecoder<Int96Type>;
 using FloatDecoder = TypedDecoder<FloatType>;
 using DoubleDecoder = TypedDecoder<DoubleType>;
-class ByteArrayDecoder : virtual public TypedDecoder<ByteArrayType> {};
-class FLBADecoder : virtual public TypedDecoder<FLBAType> {};
+
+class ByteArrayDecoder : virtual public TypedDecoder<ByteArrayType> {
+ public:
+  using TypedDecoder<ByteArrayType>::DecodeSpaced;
+  virtual int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
+                          int64_t valid_bits_offset,
+                          ::arrow::internal::ChunkedBinaryBuilder* builder) = 0;
+  virtual int DecodeArrowNonNull(int num_values,
+                                 ::arrow::internal::ChunkedBinaryBuilder* builder) = 0;
+
+  // virtual int DecodeArrowDict(int num_values, int null_count,
+  //                             const uint8_t* valid_bits, int64_t valid_bits_offset,
+  //                             ::arrow::BinaryDictionaryBuilder* builder) = 0;
+};
+
+class FLBADecoder : virtual public TypedDecoder<FLBAType> {
+ public:
+  using TypedDecoder<FLBAType>::DecodeSpaced;
+  // virtual int DecodeArrow(int num_values, int null_count,
+  //                         const uint8_t* valid_bits, int64_t valid_bits_offset,
+  //                         ::arrow::FixedSizeBinaryBuilder* builder) = 0;
+
+  // virtual int DecodeArrowDict(int num_values, int null_count,
+  //                             const uint8_t* valid_bits, int64_t valid_bits_offset,
+  //                             ::arrow::BinaryDictionaryBuilder* builder) = 0;
+};
 
 template <typename T>
 struct TypeTraits {};

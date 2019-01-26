@@ -29,8 +29,6 @@
 
 #include <gtest/gtest.h>
 
-#include "arrow/util/checked_cast.h"
-
 #include "parquet/column_page.h"
 #include "parquet/column_reader.h"
 #include "parquet/column_writer.h"
@@ -40,8 +38,6 @@
 
 using std::shared_ptr;
 using std::vector;
-
-using ::arrow::internal::checked_cast;
 
 namespace parquet {
 
@@ -262,8 +258,8 @@ class DictionaryPageBuilder {
   explicit DictionaryPageBuilder(const ColumnDescriptor* d)
       : num_dict_values_(0), have_values_(false) {
     auto encoder = MakeTypedEncoder<TYPE>(Encoding::PLAIN, true, d);
-    dict_traits_ = checked_cast<DictEncoder<TYPE>*>(encoder.get());
-    encoder_.reset(checked_cast<SpecializedEncoder*>(encoder.release()));
+    dict_traits_ = dynamic_cast<DictEncoder<TYPE>*>(encoder.get());
+    encoder_.reset(dynamic_cast<SpecializedEncoder*>(encoder.release()));
   }
 
   ~DictionaryPageBuilder() {}

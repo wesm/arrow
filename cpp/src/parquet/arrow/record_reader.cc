@@ -48,7 +48,6 @@ using arrow::MemoryPool;
 namespace parquet {
 namespace internal {
 
-using ::arrow::internal::checked_cast;
 namespace BitUtil = ::arrow::BitUtil;
 
 template <typename DType>
@@ -714,7 +713,7 @@ inline void TypedRecordReader<DType>::ConfigureDictionary(const DictionaryPage* 
     std::unique_ptr<DictDecoder<DType>> decoder = MakeDictDecoder<DType>(descr_, pool_);
     decoder->SetDict(dictionary.get());
     decoders_[encoding] =
-        std::unique_ptr<DecoderType>(checked_cast<DecoderType*>(decoder.release()));
+        std::unique_ptr<DecoderType>(dynamic_cast<DecoderType*>(decoder.release()));
   } else {
     ParquetException::NYI("only plain dictionary encoding has been implemented");
   }

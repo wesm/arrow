@@ -740,7 +740,9 @@ class PlainByteArrayDecoder : public PlainDecoder<ByteArrayType>,
       if (bit_reader.IsSet()) {
         uint32_t len = *reinterpret_cast<const uint32_t*>(data);
         increment = static_cast<int>(sizeof(uint32_t) + len);
-        if (data_size < increment) ParquetException::EofException();
+        if (data_size < increment) {
+          ParquetException::EofException();
+        }
         ARROW_RETURN_NOT_OK(out->Append(data + sizeof(uint32_t), len));
         data += increment;
         data_size -= increment;
@@ -943,26 +945,39 @@ class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
   ::arrow::Status DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
                               int64_t valid_bits_offset, BuilderType* builder,
                               int* out_num_values) {
-    constexpr int32_t buffer_size = 2048;
+    constexpr int32_t buffer_size = 1024;
     int32_t indices_buffer[buffer_size];
 
     ::arrow::internal::BitmapReader bit_reader(valid_bits, valid_bits_offset, num_values);
 
     int values_decoded = 0;
     while (values_decoded < num_values) {
-      int32_t batch_size = std::min<int32_t>(buffer_size, num_values - values_decoded);
-      int num_indices = idx_decoder_.GetBatch(indices_buffer, batch_size);
-      if (num_indices == 0) break;
-      int i = 0;
-      while (i < num_indices && values_decoded < num_values) {
-        if (bit_reader.IsSet()) {
-          const auto& val = dictionary_[indices_buffer[i]];
-          ARROW_RETURN_NOT_OK(builder->Append(val.ptr, val.len));
-          ++i;
-        } else {
-          ARROW_RETURN_NOT_OK(builder->AppendNull());
+      bool is_valid = bit_reader.IsSet();
+      bit_reader.Next();
+
+      if (is_valid) {
+        int32_t batch_size = std::min<int32_t>(buffer_size, num_values - values_decoded
+                                               - null_count);
+        int num_indices = idx_decoder_.GetBatch(indices_buffer, batch_size);
+
+        int i = 0;
+        while (i < num_indices) {
+          // Consume all indices
+          if (is_valid) {
+            const auto& val = dictionary_[indices_buffer[i]];
+            ARROW_RETURN_NOT_OK(builder->Append(val.ptr, val.len));
+            ++i;
+          } else {
+            ARROW_RETURN_NOT_OK(builder->AppendNull());
+            --null_count;
+          }
+          ++values_decoded;
+          is_valid = bit_reader.IsSet();
+          bit_reader.Next();
         }
-        bit_reader.Next();
+      } else {
+        ARROW_RETURN_NOT_OK(builder->AppendNull());
+        --null_count;
         ++values_decoded;
       }
     }

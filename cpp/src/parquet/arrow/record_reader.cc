@@ -1,4 +1,4 @@
-// licensed to the Apache Software Foundation (ASF) under one
+// Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership.  The ASF licenses this file
@@ -81,8 +81,7 @@ class RecordReader::RecordReaderImpl {
         levels_written_(0),
         levels_position_(0),
         levels_capacity_(0),
-        uses_values_(!(descr->physical_type() == Type::BYTE_ARRAY ||
-                       descr->physical_type() == Type::FIXED_LEN_BYTE_ARRAY)) {
+        uses_values_(!(descr->physical_type() == Type::BYTE_ARRAY)) {
     nullable_values_ = internal::HasSpacedValues(descr);
     if (uses_values_) {
       values_ = AllocateBuffer(pool);
@@ -659,12 +658,9 @@ inline void TypedRecordReader<FLBAType>::ReadValuesDense(int64_t values_to_read)
 template <>
 inline void TypedRecordReader<ByteArrayType>::ReadValuesSpaced(int64_t values_to_read,
                                                                int64_t null_count) {
-  uint8_t* valid_bits = valid_bits_->mutable_data();
-  const int64_t valid_bits_offset = values_written_;
-
   int64_t num_decoded = current_decoder_->DecodeArrow(
-      static_cast<int>(values_to_read), static_cast<int>(null_count), valid_bits,
-      valid_bits_offset, builder_.get());
+      static_cast<int>(values_to_read), static_cast<int>(null_count),
+      valid_bits_->mutable_data(), values_written_, builder_.get());
   DCHECK_EQ(num_decoded, values_to_read);
   ResetValues();
 }

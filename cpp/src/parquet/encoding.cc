@@ -23,6 +23,7 @@
 #include <memory>
 #include <vector>
 
+#include "arrow/builder.h"
 #include "arrow/util/bit-stream-utils.h"
 #include "arrow/util/bit-util.h"
 #include "arrow/util/hashing.h"
@@ -704,6 +705,15 @@ class PlainByteArrayDecoder : public PlainDecoder<ByteArrayType>,
     return result;
   }
 
+  int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
+                  int64_t valid_bits_offset,
+                  ::arrow::BinaryDictionaryBuilder* out) override {
+    int result = 0;
+    PARQUET_THROW_NOT_OK(
+        DecodeArrow(num_values, null_count, valid_bits, valid_bits_offset, out, &result));
+    return result;
+  }
+
   int DecodeArrowNonNull(int num_values,
                          ::arrow::internal::ChunkedBinaryBuilder* out) override {
     int result = 0;
@@ -905,7 +915,34 @@ class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
 
   int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
                   int64_t valid_bits_offset,
-                  ::arrow::internal::ChunkedBinaryBuilder* builder) override {
+                  ::arrow::internal::ChunkedBinaryBuilder* out) override {
+    int result = 0;
+    PARQUET_THROW_NOT_OK(
+        DecodeArrow(num_values, null_count, valid_bits, valid_bits_offset, out, &result));
+    return result;
+  }
+
+  int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
+                  int64_t valid_bits_offset,
+                  ::arrow::BinaryDictionaryBuilder* out) override {
+    int result = 0;
+    PARQUET_THROW_NOT_OK(
+        DecodeArrow(num_values, null_count, valid_bits, valid_bits_offset, out, &result));
+    return result;
+  }
+
+  int DecodeArrowNonNull(int num_values,
+                         ::arrow::internal::ChunkedBinaryBuilder* out) override {
+    int result = 0;
+    PARQUET_THROW_NOT_OK(DecodeArrowNonNull(num_values, out, &result));
+    return result;
+  }
+
+ private:
+  template <typename BuilderType>
+  ::arrow::Status DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
+                              int64_t valid_bits_offset, BuilderType* builder,
+                              int* out_num_values) {
     constexpr int32_t buffer_size = 2048;
     int32_t indices_buffer[buffer_size];
 
@@ -920,10 +957,10 @@ class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
       while (i < num_indices && values_decoded < num_values) {
         if (bit_reader.IsSet()) {
           const auto& val = dictionary_[indices_buffer[i]];
-          PARQUET_THROW_NOT_OK(builder->Append(val.ptr, val.len));
+          ARROW_RETURN_NOT_OK(builder->Append(val.ptr, val.len));
           ++i;
         } else {
-          PARQUET_THROW_NOT_OK(builder->AppendNull());
+          ARROW_RETURN_NOT_OK(builder->AppendNull());
         }
         bit_reader.Next();
         ++values_decoded;
@@ -932,11 +969,13 @@ class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
     if (values_decoded != num_values) {
       ParquetException::EofException();
     }
-    return values_decoded;
+    *out_num_values = values_decoded;
+    return ::arrow::Status::OK();
   }
 
-  int DecodeArrowNonNull(int num_values,
-                         ::arrow::internal::ChunkedBinaryBuilder* builder) override {
+  template <typename BuilderType>
+  ::arrow::Status DecodeArrowNonNull(int num_values, BuilderType* builder,
+                                     int* out_num_values) {
     constexpr int32_t buffer_size = 2048;
     int32_t indices_buffer[buffer_size];
     int values_decoded = 0;
@@ -952,7 +991,8 @@ class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
     if (values_decoded != num_values) {
       ParquetException::EofException();
     }
-    return values_decoded;
+    *out_num_values = values_decoded;
+    return ::arrow::Status::OK();
   }
 };
 

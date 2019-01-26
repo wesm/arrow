@@ -109,7 +109,7 @@ static void DecodeDict(std::vector<typename Type::c_type>& values,
   auto base_encoder =
       MakeEncoder(Type::type_num, Encoding::PLAIN, true, descr.get(), allocator);
   auto encoder = dynamic_cast<typename TypeTraits<Type>::Encoder*>(base_encoder.get());
-  auto dict_traits = dynamic_cast<DictEncoder*>(base_encoder.get());
+  auto dict_traits = dynamic_cast<DictEncoder<Type>*>(base_encoder.get());
   encoder->Put(values.data(), num_values);
 
   std::shared_ptr<ResizableBuffer> dict_buffer =

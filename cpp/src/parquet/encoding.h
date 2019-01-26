@@ -78,18 +78,18 @@ class TypedEncoder : virtual public Encoder {
 };
 
 // Base class for dictionary encoders
-class PARQUET_EXPORT DictEncoder {
+template <typename DType>
+class DictEncoder : virtual public TypedEncoder<DType> {
  public:
-  virtual ~DictEncoder() = default;
-
   /// Writes out any buffered indices to buffer preceded by the bit width of this data.
   /// Returns the number of bytes written.
   /// If the supplied buffer is not big enough, returns -1.
   /// buffer must be preallocated with buffer_len bytes. Use EstimatedDataEncodedSize()
   /// to size buffer.
-  int WriteIndices(uint8_t* buffer, int buffer_len);
+  virtual int WriteIndices(uint8_t* buffer, int buffer_len) = 0;
 
-  int dict_encoded_size() { return dict_encoded_size_; }
+  virtual int dict_encoded_size() = 0;
+  // virtual int dict_encoded_size() { return dict_encoded_size_; }
 
   virtual int bit_width() const = 0;
 
@@ -98,17 +98,6 @@ class PARQUET_EXPORT DictEncoder {
   virtual void WriteDict(uint8_t* buffer) = 0;
 
   virtual int num_entries() const = 0;
-
- protected:
-  DictEncoder();
-  /// Clears all the indices (but leaves the dictionary).
-  void ClearIndices() { buffered_indices_.clear(); }
-
-  /// Indices that have not yet be written out by WriteIndices().
-  std::vector<int> buffered_indices_;
-
-  /// The number of bytes needed to encode the dictionary.
-  int dict_encoded_size_;
 };
 
 // ----------------------------------------------------------------------

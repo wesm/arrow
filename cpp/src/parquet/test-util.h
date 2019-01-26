@@ -262,7 +262,7 @@ class DictionaryPageBuilder {
   explicit DictionaryPageBuilder(const ColumnDescriptor* d)
       : num_dict_values_(0), have_values_(false) {
     auto encoder = MakeTypedEncoder<TYPE>(Encoding::PLAIN, true, d);
-    dict_traits_ = checked_cast<DictEncoder*>(encoder.get());
+    dict_traits_ = checked_cast<DictEncoder<TYPE>*>(encoder.get());
     encoder_.reset(checked_cast<SpecializedEncoder*>(encoder.release()));
   }
 
@@ -287,7 +287,7 @@ class DictionaryPageBuilder {
   int32_t num_values() const { return num_dict_values_; }
 
  private:
-  DictEncoder* dict_traits_;
+  DictEncoder<TYPE>* dict_traits_;
   std::unique_ptr<SpecializedEncoder> encoder_;
   int32_t num_dict_values_;
   bool have_values_;

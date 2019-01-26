@@ -242,7 +242,7 @@ void PlainBooleanEncoder::Put(const std::vector<bool>& src, int num_values) {
 }
 
 // ----------------------------------------------------------------------
-// DictEncoder implementations
+// DictEncoder<T> implementations
 
 template <typename DType>
 struct DictEncoderTraits {
@@ -260,33 +260,13 @@ struct DictEncoderTraits<FLBAType> {
   using MemoTableType = ::arrow::internal::BinaryMemoTable;
 };
 
-DictEncoder::DictEncoder() : dict_encoded_size_(0) {}
-
-int DictEncoder::WriteIndices(uint8_t* buffer, int buffer_len) {
-  // Write bit width in first byte
-  *buffer = static_cast<uint8_t>(bit_width());
-  ++buffer;
-  --buffer_len;
-
-  ::arrow::util::RleEncoder encoder(buffer, buffer_len, bit_width());
-  for (int index : buffered_indices_) {
-    if (!encoder.Put(index)) return -1;
-  }
-  encoder.Flush();
-
-  ClearIndices();
-  return 1 + encoder.len();
-}
-
 /// See the dictionary encoding section of https://github.com/Parquet/parquet-format.
 /// The encoding supports streaming encoding. Values are encoded as they are added while
 /// the dictionary is being constructed. At any time, the buffered values can be
 /// written out with the current dictionary size. More values can then be added to
 /// the encoder, including new dictionary entries.
 template <typename DType>
-class DictEncoderImpl : public EncoderImpl,
-                        public DictEncoder,
-                        virtual public TypedEncoder<DType> {
+class DictEncoderImpl : public EncoderImpl, virtual public DictEncoder<DType> {
   using MemoTableType = typename DictEncoderTraits<DType>::MemoTableType;
 
  public:
@@ -297,6 +277,24 @@ class DictEncoderImpl : public EncoderImpl,
       ::arrow::MemoryPool* allocator = ::arrow::default_memory_pool());
 
   ~DictEncoderImpl() override { DCHECK(buffered_indices_.empty()); }
+
+  int dict_encoded_size() override { return dict_encoded_size_; }
+
+  int WriteIndices(uint8_t* buffer, int buffer_len) override {
+    // Write bit width in first byte
+    *buffer = static_cast<uint8_t>(bit_width());
+    ++buffer;
+    --buffer_len;
+
+    ::arrow::util::RleEncoder encoder(buffer, buffer_len, bit_width());
+    for (int index : buffered_indices_) {
+      if (!encoder.Put(index)) return -1;
+    }
+    encoder.Flush();
+
+    ClearIndices();
+    return 1 + encoder.len();
+  }
 
   void set_type_length(int type_length) { this->type_length_ = type_length; }
 
@@ -325,6 +323,15 @@ class DictEncoderImpl : public EncoderImpl,
   int num_entries() const override { return memo_table_.size(); }
 
  private:
+  /// Clears all the indices (but leaves the dictionary).
+  void ClearIndices() { buffered_indices_.clear(); }
+
+  /// Indices that have not yet be written out by WriteIndices().
+  std::vector<int> buffered_indices_;
+
+  /// The number of bytes needed to encode the dictionary.
+  int dict_encoded_size_;
+
   MemoTableType memo_table_;
 };
 
@@ -335,6 +342,7 @@ template <typename DType>
 DictEncoderImpl<DType>::DictEncoderImpl(const ColumnDescriptor* desc,
                                         ::arrow::MemoryPool* pool)
     : EncoderImpl(desc, Encoding::PLAIN_DICTIONARY, pool),
+      dict_encoded_size_(0),
       memo_table_(INITIAL_HASH_TABLE_SIZE) {}
 
 template <typename DType>
@@ -815,8 +823,7 @@ class DictByteArrayDecoder : public DictDecoderImpl<ByteArrayType>,
   using BASE::DictDecoderImpl;
 };
 
-class DictFLBADecoder : public DictDecoderImpl<FLBAType>,
-                        virtual public FLBADecoder {
+class DictFLBADecoder : public DictDecoderImpl<FLBAType>, virtual public FLBADecoder {
  public:
   using BASE = DictDecoderImpl<FLBAType>;
   using BASE::DictDecoderImpl;

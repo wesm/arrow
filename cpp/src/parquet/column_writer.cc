@@ -557,9 +557,9 @@ TypedColumnWriter<Type>::TypedColumnWriter(ColumnChunkMetaDataBuilder* metadata,
 // Fallback to PLAIN if dictionary page limit is reached.
 template <typename Type>
 void TypedColumnWriter<Type>::CheckDictionarySizeLimit() {
-  // We static cast here because TypedEncoder<Type> is not considered to be a
-  // subclass of DictEncoder so cannot use checked_cast
-  auto dict_encoder = dynamic_cast<DictEncoder*>(current_encoder_.get());
+  // We static cast here because TypedEncoder<Type> as some compilers don't
+  // want to cast through virtual inheritance
+  auto dict_encoder = dynamic_cast<DictEncoder<Type>*>(current_encoder_.get());
   if (dict_encoder->dict_encoded_size() >= properties_->dictionary_pagesize_limit()) {
     WriteDictionaryPage();
     // Serialize the buffered Dictionary Indicies
@@ -574,9 +574,9 @@ void TypedColumnWriter<Type>::CheckDictionarySizeLimit() {
 
 template <typename Type>
 void TypedColumnWriter<Type>::WriteDictionaryPage() {
-  // We static cast here because TypedEncoder<Type> is not considered to be a
-  // subclass of DictEncoder so cannot use checked_cast
-  auto dict_encoder = dynamic_cast<DictEncoder*>(current_encoder_.get());
+  // We static cast here because TypedEncoder<Type> as some compilers don't
+  // want to cast through virtual inheritance
+  auto dict_encoder = dynamic_cast<DictEncoder<Type>*>(current_encoder_.get());
   DCHECK(dict_encoder);
   std::shared_ptr<ResizableBuffer> buffer =
       AllocateBuffer(properties_->memory_pool(), dict_encoder->dict_encoded_size());

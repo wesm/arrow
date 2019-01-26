@@ -58,7 +58,7 @@ static void BM_PlainDecodingBoolean(benchmark::State& state) {
   while (state.KeepRunning()) {
     auto decoder = MakeTypedDecoder<BooleanType>(Encoding::PLAIN);
     decoder->SetData(static_cast<int>(values.size()), buf->data(),
-                    static_cast<int>(buf->size()));
+                     static_cast<int>(buf->size()));
     decoder->Decode(output, static_cast<int>(values.size()));
   }
 
@@ -89,7 +89,7 @@ static void BM_PlainDecodingInt64(benchmark::State& state) {
   while (state.KeepRunning()) {
     auto decoder = MakeTypedDecoder<Int64Type>(Encoding::PLAIN);
     decoder->SetData(static_cast<int>(values.size()), buf->data(),
-                    static_cast<int>(buf->size()));
+                     static_cast<int>(buf->size()));
     decoder->Decode(values.data(), static_cast<int>(values.size()));
   }
   state.SetBytesProcessed(state.iterations() * state.range(0) * sizeof(int64_t));

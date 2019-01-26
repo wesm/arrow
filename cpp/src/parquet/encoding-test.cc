@@ -256,7 +256,7 @@ class TestDictionaryEncoding : public TestEncodingBase<Type> {
 
     auto base_encoder = MakeEncoder(Type::type_num, Encoding::PLAIN, true, descr_.get());
     auto encoder = dynamic_cast<typename TypeTraits<Type>::Encoder*>(base_encoder.get());
-    auto dict_traits = dynamic_cast<DictEncoder*>(base_encoder.get());
+    auto dict_traits = dynamic_cast<DictEncoder<Type>*>(base_encoder.get());
 
     ASSERT_NO_THROW(encoder->Put(draws_, num_values_));
     dict_buffer_ =

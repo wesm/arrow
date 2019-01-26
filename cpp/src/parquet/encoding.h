@@ -115,7 +115,7 @@ class DictEncoder : virtual public TypedEncoder<DType> {
 // ----------------------------------------------------------------------
 // Value decoding
 
-class PARQUET_EXPORT Decoder {
+class Decoder {
  public:
   virtual ~Decoder() = default;
 
@@ -170,7 +170,7 @@ class TypedDecoder : virtual public Decoder {
 };
 
 template <typename DType>
-class PARQUET_EXPORT DictDecoder : virtual public TypedDecoder<DType> {
+class DictDecoder : virtual public TypedDecoder<DType> {
  public:
   virtual void SetDict(TypedDecoder<DType>* dictionary) = 0;
 };

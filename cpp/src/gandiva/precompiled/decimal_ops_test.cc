@@ -27,8 +27,6 @@
 
 namespace gandiva {
 
-using internal::DecimalTypeUtil;
-
 class TestDecimalSql : public ::testing::Test {
  protected:
   static void AddAndVerify(const DecimalScalar128& x, const DecimalScalar128& y,

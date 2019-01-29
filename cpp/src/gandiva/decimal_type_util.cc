@@ -19,7 +19,6 @@
 #include "gandiva/logging.h"
 
 namespace gandiva {
-namespace internal {
 
 constexpr int32_t DecimalTypeUtil::kMinAdjustedScale;
 
@@ -73,5 +72,4 @@ Status DecimalTypeUtil::GetResultType(Op op, const Decimal128TypeVector& in_type
   return Status::OK();
 }
 
-}  // namespace internal
 }  // namespace gandiva

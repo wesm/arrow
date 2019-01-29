@@ -31,8 +31,6 @@ using arrow::Decimal128;
 
 namespace gandiva {
 
-using internal::DecimalTypeUtil;
-
 class TestDecimal : public ::testing::Test {
  public:
   void SetUp() { pool_ = arrow::default_memory_pool(); }

@@ -24,8 +24,6 @@
 
 namespace gandiva {
 
-using internal::DecimalTypeUtil;
-
 #define DECIMAL_TYPE(p, s) DecimalTypeUtil::MakeType(p, s)
 
 Decimal128TypePtr DoOp(DecimalTypeUtil::Op op, Decimal128TypePtr d1,

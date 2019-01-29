@@ -31,8 +31,6 @@ using arrow::Decimal128;
 
 namespace gandiva {
 
-using internal::DecimalTypeUtil;
-
 #define EXPECT_DECIMAL_SUM_EQUALS(x, y, expected, actual)                  \
   EXPECT_EQ(expected, actual) << (x).ToString() << " + " << (y).ToString() \
                               << " expected : " << (expected).ToString()   \

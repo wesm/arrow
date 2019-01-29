@@ -27,7 +27,6 @@
 #include "gandiva/visibility.h"
 
 namespace gandiva {
-namespace internal {
 
 /// @brief Handles conversion of scale/precision for operations on decimal types.
 /// TODO : do validations for all of these.
@@ -84,7 +83,6 @@ inline Decimal128TypePtr DecimalTypeUtil::MakeType(int32_t precision, int32_t sc
       arrow::decimal(precision, scale));
 }
 
-}  // namespace internal
 }  // namespace gandiva
 
 #endif  // GANDIVA_DECIMAL_TYPE_SQL_H

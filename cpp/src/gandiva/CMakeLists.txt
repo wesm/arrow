@@ -94,14 +94,14 @@ if (ARROW_GANDIVA_STATIC_LIBSTDCPP
     -static-libgcc)
 endif()
 
-if (MSVC)
-  # Symbols that need to be made public in gandiva.dll for LLVM IR
-  # compilation
-  set(MSVC_SYMBOL_EXPORTS _Init_thread_header)
-  foreach(SYMBOL ${MSVC_SYMBOL_EXPORTS})
-    set(GANDIVA_SHARED_LINK_FLAGS "${GANDIVA_SHARED_LINK_FLAGS} /EXPORT:${SYMBOL}")
-  endforeach()
-endif()
+# if (MSVC)
+#   # Symbols that need to be made public in gandiva.dll for LLVM IR
+#   # compilation
+#   set(MSVC_SYMBOL_EXPORTS _Init_thread_header)
+#   foreach(SYMBOL ${MSVC_SYMBOL_EXPORTS})
+#     set(GANDIVA_SHARED_LINK_FLAGS "${GANDIVA_SHARED_LINK_FLAGS} /EXPORT:${SYMBOL}")
+#   endforeach()
+# endif()
 
 ADD_ARROW_LIB(gandiva
   SOURCES ${SRC_FILES}

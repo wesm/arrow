@@ -26,8 +26,6 @@
 
 namespace gandiva {
 
-using internal::DecimalTypeUtil;
-
 #define ADD_TRACE_32(msg, value) \
   if (enable_ir_traces_) {       \
     AddTrace32(msg, value);      \

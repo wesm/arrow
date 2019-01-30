@@ -82,12 +82,11 @@ int64_t ToDateHolder::operator()(ExecutionContext* context, const std::string& d
   // 1. processes date that do not match the format.
   // 2. does not process time in format +08:00 (or) id.
   int64_t seconds_since_epoch = 0;
-  if (!internal::ParseTimestamp(data.c_str(), pattern_.c_str(), &seconds_since_epoch)) {
+  if (!internal::ParseTimestamp(data.c_str(), pattern_.c_str(), true,
+                                &seconds_since_epoch)) {
     return_error(context, data);
     return 0;
   }
-  // Drop any time component
-  seconds_since_epoch -= seconds_since_epoch % 86400;
 
   *out_valid = true;
   return seconds_since_epoch * 1000;

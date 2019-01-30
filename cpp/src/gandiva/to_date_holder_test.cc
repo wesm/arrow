@@ -62,6 +62,18 @@ TEST_F(TestToDateHolder, TestSimpleDateTime) {
       to_date(&execution_context_, "1986-12-01 01:01:01 +0800", true, &out_valid);
   EXPECT_EQ(millis_since_epoch, 533779200000);
 
+#if !defined(_MSC_VER)
+  // TODO : bug in date::parse
+  millis_since_epoch =
+      to_date(&execution_context_, "1886-12-01 00:00:00", true, &out_valid);
+  EXPECT_EQ(out_valid, true);
+  EXPECT_EQ(millis_since_epoch, -2621894400000);
+#endif
+
+  millis_since_epoch =
+      to_date(&execution_context_, "1886-12-01 01:01:01", true, &out_valid);
+  EXPECT_EQ(millis_since_epoch, -2621894400000);
+
   millis_since_epoch =
       to_date(&execution_context_, "1986-12-11 01:30:00", true, &out_valid);
   EXPECT_EQ(millis_since_epoch, 534643200000);

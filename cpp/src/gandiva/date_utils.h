@@ -60,19 +60,31 @@ class GANDIVA_EXPORT DateUtils {
 namespace internal {
 
 /// \brief Returns seconds since the UNIX epoch
-static inline bool ParseTimestamp(const char* buf, const char* format, int64_t* out) {
+static inline bool ParseTimestamp(const char* buf, const char* format,
+                                  bool ignoreTimeInDay, int64_t* out) {
 #if defined(_MSC_VER)
   static std::locale lc_all(setlocale(LC_ALL, NULLPTR));
   std::istringstream stream(buf);
   stream.imbue(lc_all);
 
-  date::sys_seconds secs;
-  stream >> date::parse(format, secs);
-  if (stream.fail()) {
-    return false;
+  // TODO: date::parse fails parsing when the hour value is 0.
+  // eg.1886-12-01 00:00:00
+  date::sys_seconds seconds;
+  if (ignoreTimeInDay) {
+    date::sys_days days;
+    stream >> date::parse(format, days);
+    if (stream.fail()) {
+      return false;
+    }
+    seconds = days;
+  } else {
+    stream >> date::parse(format, seconds);
+    if (stream.fail()) {
+      return false;
+    }
   }
-
-  *out = secs.time_since_epoch().count();
+  auto seconds_in_epoch = seconds.time_since_epoch().count();
+  *out = seconds_in_epoch;
   return true;
 #else
   struct tm result;
@@ -81,9 +93,13 @@ static inline bool ParseTimestamp(const char* buf, const char* format, int64_t* 
     return false;
   }
   // ignore the time part
-  auto days = date::sys_days(date::year(result.tm_year + 1900) / (result.tm_mon + 1) /
-                             result.tm_mday);
-  *out = days.time_since_epoch().count();
+  date::sys_seconds secs = date::sys_days(date::year(result.tm_year + 1900) /
+                                          (result.tm_mon + 1) / result.tm_mday);
+  if (!ignoreTimeInDay) {
+    secs += (std::chrono::hours(result.tm_hour) + std::chrono::minutes(result.tm_min) +
+             std::chrono::seconds(result.tm_sec));
+  }
+  *out = secs.time_since_epoch().count();
   return true;
 #endif
 }

@@ -125,6 +125,9 @@ bool Array::RangeEquals(const Array& other, int64_t start_idx, int64_t end_idx,
 
 static inline std::shared_ptr<ArrayData> SliceData(const ArrayData& data, int64_t offset,
                                                    int64_t length) {
+  if (offset > data.length) {
+    DCHECK(false) << "should not be able to get here";
+  }
   DCHECK_LE(offset, data.length);
   length = std::min(data.length - offset, length);
   offset += data.offset;

@@ -81,12 +81,16 @@ Status ListBuilder::Resize(int64_t capacity) {
   return ArrayBuilder::Resize(capacity);
 }
 
-Status ListBuilder::FinishInternal(std::shared_ptr<ArrayData>* out) {
+Status ListBuilder::FinishOffsets(std::shared_ptr<Buffer>* offsets) {
   RETURN_NOT_OK(AppendNextOffset());
 
   // Offset padding zeroed by BufferBuilder
+  return offsets_builder_.Finish(&offsets);
+}
+
+Status ListBuilder::FinishInternal(std::shared_ptr<ArrayData>* out) {
   std::shared_ptr<Buffer> offsets;
-  RETURN_NOT_OK(offsets_builder_.Finish(&offsets));
+  RETURN_NOT_OK(FinishOffsets(&offsets));
 
   std::shared_ptr<ArrayData> items;
   if (values_) {

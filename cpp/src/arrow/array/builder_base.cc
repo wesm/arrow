@@ -77,6 +77,10 @@ Status ArrayBuilder::Advance(int64_t elements) {
   return null_bitmap_builder_.Advance(elements);
 }
 
+Status ArrayBuilder::FinishValidityBitmap(std::shared_ptr<Buffer>* out) {
+  return null_bitmap_builder_.Finish(&out);
+}
+
 Status ArrayBuilder::Finish(std::shared_ptr<Array>* out) {
   std::shared_ptr<ArrayData> internal_data;
   RETURN_NOT_OK(FinishInternal(&internal_data));

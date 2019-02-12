@@ -189,11 +189,10 @@ struct Unbox<DoubleType> {
 // We use CRTP to avoid virtual calls to the AppendItem(), AppendNull(), and
 // IsNull() on the hot path
 template <typename Type, class Derived,
-          NullCoding null_coding = NullCoding::PANDAS_SENTINELS>
+          NullCoding null_coding = NullCoding::PANDAS_SENTINELS,
+          typename BuilderType = typename TypeTraits<Type>::BuilderType>
 class TypedConverter : public SeqConverter {
  public:
-  using BuilderType = typename TypeTraits<Type>::BuilderType;
-
   Status Init(ArrayBuilder* builder) override {
     builder_ = builder;
     DCHECK_NE(builder_, nullptr);
@@ -479,7 +478,7 @@ class BinaryLikeConverter : public TypedConverter<Type, BinaryLikeConverter<Type
  public:
   Status AppendItem(PyObject* obj) {
     // Accessing members of the templated base requires using this-> here
-    bool is_full = false;
+p     bool is_full = false;
     RETURN_NOT_OK(detail::BuilderAppend(this->typed_builder_, obj, &is_full));
 
     // Exceeded capacity of builder
@@ -608,10 +607,22 @@ class ListConverter : public TypedConverter<ListType, ListConverter> {
     return value_converter_->AppendMultiple(obj, list_size);
   }
 
-  // virtual Status GetResult(std::vector<std::shared_ptr<Array>>* chunks) {
-  //   // TODO: Handle chunked children
-  //   return SeqConverter::GetResult(chunks);
-  // }
+  Status GetResult(std::vector<std::shared_ptr<Array>>* chunks) override {
+    std::vector<std::shared_ptr<Array>> child_chunks;
+    RETURN_NOT_OK(value_converter_->GetResult(&child_chunks));
+
+    std::shared_ptr<Buffer> validity_bitmap, offsets;
+
+    RETURN_NOT_OK(typed_builder_->FinishValidityBitmap(&validity_bitmap));
+    RETURN_NOT_OK(typed_builder_->FinishOffsets(&offsets));
+
+    if (child_chunks.size() == 1) {
+
+    }
+
+    // TODO: Handle chunked children
+    return SeqConverter::GetResult(chunks);
+  }
 
  protected:
   std::shared_ptr<DataType> value_type_;

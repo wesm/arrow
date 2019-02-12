@@ -114,6 +114,12 @@ class ARROW_EXPORT ArrayBuilder {
   /// \return Status
   virtual Status FinishInternal(std::shared_ptr<ArrayData>* out) = 0;
 
+  /// \brief Return completed validity bitmap. Intended for internal use only
+  /// as this resets the bitmap builder
+  /// \param[out] out the finished bitmap
+  /// \return Status
+  Status FinishValidityBitmap(std::shared_ptr<Buffer>* out);
+
   /// \brief Return result of builder as an Array object.
   ///
   /// The builder is reset except for DictionaryBuilder.

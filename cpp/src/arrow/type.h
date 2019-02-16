@@ -133,7 +133,10 @@ struct Type {
     DICTIONARY,
 
     /// Map, a repeated struct logical type
-    MAP
+    MAP,
+
+    /// Custom data type, implemented by user
+    EXTENSION
   };
 };
 

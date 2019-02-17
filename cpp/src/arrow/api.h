@@ -24,6 +24,7 @@
 #include "arrow/buffer.h"         // IYWU pragma: export
 #include "arrow/builder.h"        // IYWU pragma: export
 #include "arrow/compare.h"        // IYWU pragma: export
+#include "arrow/extension_type.h" // IYWU pragma: export
 #include "arrow/memory_pool.h"    // IYWU pragma: export
 #include "arrow/pretty_print.h"   // IYWU pragma: export
 #include "arrow/record_batch.h"   // IYWU pragma: export

@@ -1,0 +1,94 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <numeric>
+#include <string>
+#include <type_traits>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include "arrow/array.h"
+#include "arrow/buffer-builder.h"
+#include "arrow/buffer.h"
+#include "arrow/extension_type.h"
+#include "arrow/ipc/test-common.h"
+#include "arrow/record_batch.h"
+#include "arrow/status.h"
+#include "arrow/testing/gtest_common.h"
+#include "arrow/testing/util.h"
+#include "arrow/type.h"
+
+namespace arrow {
+
+class UUIDType : public ExtensionType {
+ public:
+  UUIDType() : ExtensionType(::arrow::fixed_size_binary(16)) {}
+
+  std::string extension_name() const override {
+    return "uuid";
+  }
+};
+
+class UUIDArray : public ExtensionArray {
+ public:
+  UUIDArray(const std::shared_ptr<ArrayData>& data)
+      : ExtensionArray(data) {}
+};
+
+class UUIDTypeAdapter : public ExtensionTypeAdapter {
+ public:
+  std::shared_ptr<Array> WrapArray(std::shared_ptr<ArrayData> data) override {
+    DCHECK_EQ(data->id(), Type::EXTENSION);
+    DCHECK_EQ("uuid", static_cast<const ExtensionType&>(*data->type)->extension_name());
+    return std::make_shared<UUIDArray>(data);
+  }
+
+  Status Deserialize(const std::string& serialized,
+                     std::shared_ptr<DataType>* out) override {
+    if (serialized != "uuid-type-unique-code") {
+      return Status::Invalid("Type identifier did not match");
+    }
+    *out = std::make_shared<UUIDType>();
+    return Status::OK();
+  }
+
+  std::string& Serialize(const ExtensionType& type) override {
+    return "uuid-type-unique-code";
+  }
+};
+
+class TestExtensionType : public ::testing::Test {
+ public:
+  void SetUp() {
+    auto adapter = std::unique_ptr<ExtensionTypeAdapter>(new UUIDTypeAdapter());
+    ASSERT_OK(::arrow::RegisterExtensionType("uuid", std::move(adapter)));
+  }
+
+  void TearDown() {
+    ASSERT_OK(::arrow::UnregisterExtensionType("uuid"));
+  }
+};
+
+}  // namespace arrow

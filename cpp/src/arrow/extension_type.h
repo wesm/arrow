@@ -31,6 +31,8 @@ class ARROW_EXPORT ExtensionType : public DataType {
  public:
   std::shared_ptr<DataType> storage_type() const { return storage_type_; }
 
+  virtual std::string extension_name() const = 0;
+
  protected:
   explicit ExtensionType(std::shared_ptr<DataType> storage_type)
     : DataType(Type::EXTENSION),
@@ -41,19 +43,31 @@ class ARROW_EXPORT ExtensionType : public DataType {
 
 class ARROW_EXPORT ExtensionArray : public Array {
  protected:
-  ExtensionArray
+  explicit ExtensionArray(const std::shared_ptr<ArrayData>& data) {
+    SetData(data);
+  }
+
+  void SetData(const std::shared_ptr<ArrayData>& data) {
+    this->Array::SetData(data);
+
+    auto storage_data = data->Copy();
+    storage_data->type = (static_cast<const ExtensionType&>(data->type)
+                          ->storage_type());
+    storage_ = MakeArray(storage_data);
+  }
+
+  std::shared_ptr<Array> storage_;
 };
 
 /// \brief Serializer interface for user-defined types
 class ExtensionTypeAdapter {
  public:
   /// \brief Wrap built-in Array type in a user-defined ExtensionArray instance
-  /// \param[in] ext_type an instance of ExtensionType
   /// \param[in] data the physical storage for the extension type
-  virtual std::shared_ptr<Array> WrapArray(std::shared_ptr<DataType> ext_type,
-                                           std::shared_ptr<Array> data) = 0;
+  virtual std::shared_ptr<Array> WrapArray(std::shared_ptr<ArrayData> data) = 0;
 
-  virtual std::shared_ptr<DataType> Deserialize(const std::string& serialized) = 0;
+  virtual Status Deserialize(const std::string& serialized,
+                             std::shared_ptr<DataType>* out) = 0;
 
   virtual std::string& Serialize(const ExtensionType& type) = 0;
 };

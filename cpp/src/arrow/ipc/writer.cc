@@ -449,6 +449,10 @@ class RecordBatchSerializer : public ArrayVisitor {
     return array.indices()->Accept(this);
   }
 
+  Status Visit(const ExtensionArray& array) override {
+    return array.storage()->Accept(this);
+  }
+
   // Destination for output buffers
   IpcPayload* out_;
 

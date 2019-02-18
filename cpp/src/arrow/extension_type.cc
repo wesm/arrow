@@ -27,9 +27,16 @@
 
 namespace arrow {
 
+bool ExtensionType::Equals(const DataType& other) const {
+  if (other.id() != Type::EXTENSION) {
+    return false;
+  }
+  return ExtensionEquals(static_cast<const ExtensionType&>(other));
+}
+
 std::string ExtensionType::ToString() const {
   std::stringstream ss;
-  ss << "extension<" << this->description() << ">";
+  ss << "extension<" << this->extension_name() << ">";
   return ss.str();
 }
 

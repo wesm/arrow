@@ -20,11 +20,13 @@
 #include <cstdint>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 
 #include <flatbuffers/flatbuffers.h>
 
 #include "arrow/array.h"
+#include "arrow/extension_type.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/ipc/File_generated.h"  // IWYU pragma: keep
 #include "arrow/ipc/Message_generated.h"
@@ -55,6 +57,7 @@ using RecordBatchOffset = flatbuffers::Offset<flatbuf::RecordBatch>;
 using SparseTensorOffset = flatbuffers::Offset<flatbuf::SparseTensor>;
 using Offset = flatbuffers::Offset<void>;
 using FBString = flatbuffers::Offset<flatbuffers::String>;
+using KVVector = flatbuffers::Vector<KeyValueOffset>;
 
 MetadataVersion GetMetadataVersion(flatbuf::MetadataVersion version) {
   switch (version) {
@@ -351,26 +354,21 @@ static DictionaryOffset GetDictionaryEncoding(FBB& fbb, const DictionaryType& ty
                                            type.ordered());
 }
 
-static flatbuffers::Offset<flatbuffers::Vector<KeyValueOffset>>
-KeyValueMetadataToFlatbuffer(FBB& fbb, const KeyValueMetadata& metadata) {
-  std::vector<KeyValueOffset> key_value_offsets;
-
-  size_t metadata_size = metadata.size();
-  key_value_offsets.reserve(metadata_size);
-
-  for (size_t i = 0; i < metadata_size; ++i) {
-    const auto& key = metadata.key(i);
-    const auto& value = metadata.value(i);
-    key_value_offsets.push_back(
-        flatbuf::CreateKeyValue(fbb, fbb.CreateString(key), fbb.CreateString(value)));
-  }
-
-  return fbb.CreateVector(key_value_offsets);
+KeyValueOffset AppendKeyValue(FBB& fbb, const std::string& key,
+                              const std::string& value) {
+  return flatbuf::CreateKeyValue(fbb, fbb.CreateString(key), fbb.CreateString(value));
 }
 
-static Status KeyValueMetadataFromFlatbuffer(
-    const flatbuffers::Vector<KeyValueOffset>* fb_metadata,
-    std::shared_ptr<KeyValueMetadata>* out) {
+void AppendKeyValueMetadata(FBB& fbb, const KeyValueMetadata& metadata,
+                            std::vector<KeyValueOffset>* key_values) {
+  key_values->reserve(metadata.size());
+  for (int i = 0; i < metadata.size(); ++i) {
+    key_values->push_back(AppendKeyValue(fbb, metadata.key(i), metadata.value(i)));
+  }
+}
+
+static Status KeyValueMetadataFromFlatbuffer(const KVVector* fb_metadata,
+                                             std::shared_ptr<KeyValueMetadata>* out) {
   auto metadata = std::make_shared<KeyValueMetadata>();
 
   metadata->reserve(fb_metadata->size());
@@ -390,6 +388,9 @@ static Status KeyValueMetadataFromFlatbuffer(
 
   return Status::OK();
 }
+
+static const char kExtensionTypeKeyName[] = "arrow_extension_name";
+static const char kExtensionDataKeyName[] = "arrow_extension_data";
 
 class FieldToFlatbufferVisitor {
  public:
@@ -550,7 +551,16 @@ class FieldToFlatbufferVisitor {
     return VisitType(*checked_cast<const DictionaryType&>(type).dictionary()->type());
   }
 
-  Status Visit(const ExtensionType& type) { return Status::OK(); }
+  Status Visit(const ExtensionType& type) {
+    auto ext_name = type.extension_name();
+    auto adapter = ::arrow::GetExtensionType(ext_name);
+    if (adapter == nullptr) {
+      return Status::Invalid("No serializer available for extension type ", ext_name);
+    }
+    extra_type_metadata_[kExtensionTypeKeyName] = ext_name;
+    extra_type_metadata_[kExtensionDataKeyName] = adapter->Serialize(type);
+    return Status::OK();
+  }
 
   Status GetResult(const Field& field, FieldOffset* offset) {
     auto fb_name = fbb_.CreateString(field.name());
@@ -564,15 +574,23 @@ class FieldToFlatbufferVisitor {
     }
 
     auto metadata = field.metadata();
+
+    flatbuffers::Offset<KVVector> fb_custom_metadata;
+    std::vector<KeyValueOffset> key_values;
     if (metadata != nullptr) {
-      auto fb_custom_metadata = KeyValueMetadataToFlatbuffer(fbb_, *metadata);
-      *offset =
-          flatbuf::CreateField(fbb_, fb_name, field.nullable(), fb_type_, type_offset_,
-                               dictionary, fb_children, fb_custom_metadata);
-    } else {
-      *offset = flatbuf::CreateField(fbb_, fb_name, field.nullable(), fb_type_,
-                                     type_offset_, dictionary, fb_children);
+      AppendKeyValueMetadata(fbb_, *metadata, &key_values);
     }
+
+    for (auto it : extra_type_metadata_) {
+      key_values.push_back(AppendKeyValue(fbb_, it.first, it.second));
+    }
+
+    if (key_values.size() > 0) {
+      fb_custom_metadata = fbb_.CreateVector(key_values);
+    }
+    *offset =
+        flatbuf::CreateField(fbb_, fb_name, field.nullable(), fb_type_, type_offset_,
+                             dictionary, fb_children, fb_custom_metadata);
     return Status::OK();
   }
 
@@ -582,6 +600,7 @@ class FieldToFlatbufferVisitor {
   flatbuf::Type fb_type_;
   Offset type_offset_;
   std::vector<FieldOffset> children_;
+  std::unordered_map<std::string, std::string> extra_type_metadata_;
 };
 
 static Status FieldToFlatbuffer(FBB& fbb, const Field& field,
@@ -680,13 +699,14 @@ static Status SchemaToFlatbuffer(FBB& fbb, const Schema& schema,
 
   /// Custom metadata
   auto metadata = schema.metadata();
-  if (metadata != nullptr) {
-    auto fb_custom_metadata = KeyValueMetadataToFlatbuffer(fbb, *metadata);
-    *out = flatbuf::CreateSchema(fbb, endianness(), fb_offsets, fb_custom_metadata);
-  } else {
-    *out = flatbuf::CreateSchema(fbb, endianness(), fb_offsets);
-  }
 
+  flatbuffers::Offset<KVVector> fb_custom_metadata;
+  std::vector<KeyValueOffset> key_values;
+  if (metadata != nullptr) {
+    AppendKeyValueMetadata(fbb, *metadata, &key_values);
+    fb_custom_metadata = fbb.CreateVector(key_values);
+  }
+  *out = flatbuf::CreateSchema(fbb, endianness(), fb_offsets, fb_custom_metadata);
   return Status::OK();
 }
 

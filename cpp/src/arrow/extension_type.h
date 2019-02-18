@@ -32,14 +32,22 @@ class ExtensionTypeTraits {
  public:
   virtual ~ExtensionTypeTraits() = default;
 
-  /// \brief String representation suitable for printing
-  virtual std::string description() const = 0;
+  /// \brief Name used for serialization, and lookups for deeserialization
+  virtual std::string extension_name() const = 0;
+
+  /// \brief Determine if two instances of the same extension types are
+  /// equal. Invoked from ExtensionType::Equals
+  /// \param[in] other the type to compare this type with
+  /// \return bool true if type instances are equal
+  virtual bool ExtensionEquals(const ExtensionType& other) const = 0;
 };
 
 /// \brief The base class for custom / user-defined types.
 class ARROW_EXPORT ExtensionType : public DataType, public ExtensionTypeTraits {
  public:
   std::shared_ptr<DataType> storage_type() const { return storage_type_; }
+
+  bool Equals(const DataType& other) const override;
 
   std::string ToString() const override;
   std::string name() const override;

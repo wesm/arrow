@@ -70,11 +70,13 @@ class UUIDTypeAdapter : public ExtensionTypeAdapter {
     return std::make_shared<UUIDArray>(data);
   }
 
-  Status Deserialize(const std::string& serialized,
+  Status Deserialize(std::shared_ptr<DataType> storage_type,
+                     const std::string& serialized,
                      std::shared_ptr<DataType>* out) override {
     if (serialized != "uuid-type-unique-code") {
       return Status::Invalid("Type identifier did not match");
     }
+    DCHECK(storage_type->Equals(*fixed_size_binary(16)));
     *out = std::make_shared<UUIDType>();
     return Status::OK();
   }
@@ -95,6 +97,9 @@ class TestExtensionType : public ::testing::Test {
 };
 
 TEST_F(TestExtensionType, AdapterTest) {
+  auto adapter_not_exist = GetExtensionType("uuid-unknown");
+  ASSERT_EQ(adapter_not_exist, nullptr);
+
   auto adapter = GetExtensionType("uuid");
   ASSERT_NE(adapter, nullptr);
 
@@ -103,7 +108,7 @@ TEST_F(TestExtensionType, AdapterTest) {
   std::string serialized = adapter->Serialize(*type);
 
   std::shared_ptr<DataType> deserialized;
-  ASSERT_OK(adapter->Deserialized(serialized, &deserialized));
+  ASSERT_OK(adapter->Deserialize(fixed_size_binary(16), serialized, &deserialized));
   ASSERT_TRUE(deserialized->Equals(*type));
 }
 

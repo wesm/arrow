@@ -59,6 +59,9 @@ using Offset = flatbuffers::Offset<void>;
 using FBString = flatbuffers::Offset<flatbuffers::String>;
 using KVVector = flatbuffers::Vector<KeyValueOffset>;
 
+static const char kExtensionTypeKeyName[] = "arrow_extension_name";
+static const char kExtensionDataKeyName[] = "arrow_extension_data";
+
 MetadataVersion GetMetadataVersion(flatbuf::MetadataVersion version) {
   switch (version) {
     case flatbuf::MetadataVersion_V1:
@@ -208,9 +211,9 @@ static inline TimeUnit::type FromFlatbufferUnit(flatbuf::TimeUnit unit) {
   return TimeUnit::SECOND;
 }
 
-static Status TypeFromFlatbuffer(flatbuf::Type type, const void* type_data,
-                                 const std::vector<std::shared_ptr<Field>>& children,
-                                 std::shared_ptr<DataType>* out) {
+static Status ConcreteTypeFromFlatbuffer(
+    flatbuf::Type type, const void* type_data,
+    const std::vector<std::shared_ptr<Field>>& children, std::shared_ptr<DataType>* out) {
   switch (type) {
     case flatbuf::Type_NONE:
       return Status::Invalid("Type metadata cannot be none");
@@ -298,6 +301,35 @@ static Status TypeFromFlatbuffer(flatbuf::Type type, const void* type_data,
     default:
       return Status::Invalid("Unrecognized type");
   }
+}
+
+static Status TypeFromFlatbuffer(const flatbuf::Field* field,
+                                 const std::vector<std::shared_ptr<Field>>& children,
+                                 const KeyValueMetadata* field_metadata,
+                                 std::shared_ptr<DataType>* out) {
+  RETURN_NOT_OK(
+      ConcreteTypeFromFlatbuffer(field->type_type(), field->type(), children, out));
+
+  // Look for extension metadata in custom_metadata field
+  // TODO(wesm): Should this be part of the Field Flatbuffers table?
+  if (field_metadata != nullptr) {
+    int name_index = field_metadata->FindKey(kExtensionTypeKeyName);
+    if (name_index == -1) {
+      return Status::OK();
+    }
+    std::string type_name = field_metadata->value(name_index);
+    int data_index = field_metadata->FindKey(kExtensionDataKeyName);
+    std::string type_data = data_index == -1 ? "" : field_metadata->value(data_index);
+
+    ExtensionTypeAdapter* adapter = GetExtensionType(type_name);
+    if (adapter == nullptr) {
+      // TODO(wesm): Extension type is unknown; we do not raise here and simply
+      // return the raw data
+      return Status::OK();
+    }
+    RETURN_NOT_OK(adapter->Deserialize(*out, type_data, out));
+  }
+  return Status::OK();
 }
 
 static Status TensorTypeToFlatbuffer(FBB& fbb, const DataType& type,
@@ -388,9 +420,6 @@ static Status KeyValueMetadataFromFlatbuffer(const KVVector* fb_metadata,
 
   return Status::OK();
 }
-
-static const char kExtensionTypeKeyName[] = "arrow_extension_name";
-static const char kExtensionDataKeyName[] = "arrow_extension_data";
 
 class FieldToFlatbufferVisitor {
  public:
@@ -609,12 +638,24 @@ static Status FieldToFlatbuffer(FBB& fbb, const Field& field,
   return field_visitor.GetResult(field, offset);
 }
 
+static Status GetFieldMetadata(const flatbuf::Field* field,
+                               std::shared_ptr<KeyValueMetadata>* metadata) {
+  auto fb_metadata = field->custom_metadata();
+  if (fb_metadata != nullptr) {
+    RETURN_NOT_OK(KeyValueMetadataFromFlatbuffer(fb_metadata, metadata));
+  }
+  return Status::OK();
+}
+
 static Status FieldFromFlatbuffer(const flatbuf::Field* field,
                                   const DictionaryMemo& dictionary_memo,
                                   std::shared_ptr<Field>* out) {
   std::shared_ptr<DataType> type;
 
   const flatbuf::DictionaryEncoding* encoding = field->dictionary();
+
+  std::shared_ptr<KeyValueMetadata> metadata;
+  RETURN_NOT_OK(GetFieldMetadata(field, &metadata));
 
   if (encoding == nullptr) {
     // The field is not dictionary encoded. We must potentially visit its
@@ -625,8 +666,7 @@ static Status FieldFromFlatbuffer(const flatbuf::Field* field,
       RETURN_NOT_OK(
           FieldFromFlatbuffer(children->Get(i), dictionary_memo, &child_fields[i]));
     }
-    RETURN_NOT_OK(
-        TypeFromFlatbuffer(field->type_type(), field->type(), child_fields, &type));
+    RETURN_NOT_OK(TypeFromFlatbuffer(field, child_fields, metadata.get(), &type));
   } else {
     // The field is dictionary encoded. The type of the dictionary values has
     // been determined elsewhere, and is stored in the DictionaryMemo. Here we
@@ -638,13 +678,6 @@ static Status FieldFromFlatbuffer(const flatbuf::Field* field,
     std::shared_ptr<DataType> index_type;
     RETURN_NOT_OK(IntFromFlatbuffer(encoding->indexType(), &index_type));
     type = ::arrow::dictionary(index_type, dictionary, encoding->isOrdered());
-  }
-
-  auto fb_metadata = field->custom_metadata();
-  std::shared_ptr<KeyValueMetadata> metadata;
-
-  if (fb_metadata != nullptr) {
-    RETURN_NOT_OK(KeyValueMetadataFromFlatbuffer(fb_metadata, &metadata));
   }
 
   *out = std::make_shared<Field>(field->name()->str(), type, field->nullable(), metadata);
@@ -666,10 +699,11 @@ static Status FieldFromFlatbufferDictionary(const flatbuf::Field* field,
     RETURN_NOT_OK(FieldFromFlatbuffer(children->Get(i), dummy_memo, &child_fields[i]));
   }
 
-  RETURN_NOT_OK(
-      TypeFromFlatbuffer(field->type_type(), field->type(), child_fields, &type));
+  std::shared_ptr<KeyValueMetadata> metadata;
+  RETURN_NOT_OK(GetFieldMetadata(field, &metadata));
 
-  *out = std::make_shared<Field>(field->name()->str(), type, field->nullable());
+  RETURN_NOT_OK(TypeFromFlatbuffer(field, child_fields, metadata.get(), &type));
+  *out = std::make_shared<Field>(field->name()->str(), type, field->nullable(), metadata);
   return Status::OK();
 }
 
@@ -1067,7 +1101,7 @@ Status GetTensorMetadata(const Buffer& metadata, std::shared_ptr<DataType>* type
     }
   }
 
-  return TypeFromFlatbuffer(tensor->type_type(), tensor->type(), {}, type);
+  return ConcreteTypeFromFlatbuffer(tensor->type_type(), tensor->type(), {}, type);
 }
 
 Status GetSparseTensorMetadata(const Buffer& metadata, std::shared_ptr<DataType>* type,
@@ -1113,7 +1147,8 @@ Status GetSparseTensorMetadata(const Buffer& metadata, std::shared_ptr<DataType>
       return Status::Invalid("Unrecognized sparse index type");
   }
 
-  return TypeFromFlatbuffer(sparse_tensor->type_type(), sparse_tensor->type(), {}, type);
+  return ConcreteTypeFromFlatbuffer(sparse_tensor->type_type(), sparse_tensor->type(), {},
+                                    type);
 }
 
 // ----------------------------------------------------------------------

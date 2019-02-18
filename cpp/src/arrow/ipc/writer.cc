@@ -26,6 +26,7 @@
 
 #include "arrow/array.h"
 #include "arrow/buffer.h"
+#include "arrow/extension_type.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/io/memory.h"
 #include "arrow/ipc/dictionary.h"

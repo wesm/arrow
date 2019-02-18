@@ -79,7 +79,8 @@ class ExtensionTypeAdapter {
   /// \param[in] data the physical storage for the extension type
   virtual std::shared_ptr<Array> WrapArray(std::shared_ptr<ArrayData> data) = 0;
 
-  virtual Status Deserialize(const std::string& serialized,
+  virtual Status Deserialize(std::shared_ptr<DataType> storage_type,
+                             const std::string& serialized_data,
                              std::shared_ptr<DataType>* out) = 0;
 
   virtual std::string Serialize(const ExtensionType& type) = 0;

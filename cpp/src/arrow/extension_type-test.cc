@@ -46,22 +46,19 @@ class UUIDType : public ExtensionType {
  public:
   UUIDType() : ExtensionType(::arrow::fixed_size_binary(16)) {}
 
-  std::string extension_name() const override {
-    return "uuid";
-  }
+  std::string description() const override { return "uuid"; }
 };
 
 class UUIDArray : public ExtensionArray {
  public:
-  UUIDArray(const std::shared_ptr<ArrayData>& data)
-      : ExtensionArray(data) {}
+  explicit UUIDArray(const std::shared_ptr<ArrayData>& data) : ExtensionArray(data) {}
 };
 
 class UUIDTypeAdapter : public ExtensionTypeAdapter {
  public:
   std::shared_ptr<Array> WrapArray(std::shared_ptr<ArrayData> data) override {
-    DCHECK_EQ(data->id(), Type::EXTENSION);
-    DCHECK_EQ("uuid", static_cast<const ExtensionType&>(*data->type)->extension_name());
+    DCHECK_EQ(data->type->id(), Type::EXTENSION);
+    DCHECK_EQ("uuid", static_cast<const ExtensionType&>(*data->type).description());
     return std::make_shared<UUIDArray>(data);
   }
 
@@ -74,7 +71,7 @@ class UUIDTypeAdapter : public ExtensionTypeAdapter {
     return Status::OK();
   }
 
-  std::string& Serialize(const ExtensionType& type) override {
+  std::string Serialize(const ExtensionType& type) override {
     return "uuid-type-unique-code";
   }
 };
@@ -86,9 +83,9 @@ class TestExtensionType : public ::testing::Test {
     ASSERT_OK(::arrow::RegisterExtensionType("uuid", std::move(adapter)));
   }
 
-  void TearDown() {
-    ASSERT_OK(::arrow::UnregisterExtensionType("uuid"));
-  }
+  void TearDown() { ASSERT_OK(::arrow::UnregisterExtensionType("uuid")); }
 };
+
+TEST_F(TestExtensionType, AdapterTest) {}
 
 }  // namespace arrow

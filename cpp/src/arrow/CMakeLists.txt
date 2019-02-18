@@ -87,6 +87,7 @@ set(ARROW_SRCS
     array/builder_union.cc
     buffer.cc
     compare.cc
+    extension_type.cc
     memory_pool.cc
     pretty_print.cc
     record_batch.cc
@@ -203,15 +204,15 @@ if(ARROW_IPC)
   add_subdirectory(ipc)
 
   set(ARROW_IPC_SRCS
-      ipc/dictionary.cc
-      ipc/feather.cc
-      ipc/json.cc
-      ipc/json-internal.cc
-      ipc/json-simple.cc
-      ipc/message.cc
-      ipc/metadata-internal.cc
-      ipc/reader.cc
-      ipc/writer.cc)
+    ipc/dictionary.cc
+    ipc/feather.cc
+    ipc/json.cc
+    ipc/json-internal.cc
+    ipc/json-simple.cc
+    ipc/message.cc
+    ipc/metadata-internal.cc
+    ipc/reader.cc
+    ipc/writer.cc)
   set(ARROW_SRCS ${ARROW_SRCS} ${ARROW_IPC_SRCS})
 
   add_dependencies(arrow_dependencies metadata_fbs)
@@ -304,6 +305,12 @@ add_arrow_test(array-test
                array-list-test.cc
                array-struct-test.cc)
 add_arrow_test(buffer-test)
+
+if (ARROW_IPC)
+  # The extension type unit tests require IPC / Flatbuffers support
+  add_arrow_test(extension_type-test)
+endif()
+
 add_arrow_test(memory_pool-test)
 add_arrow_test(pretty_print-test)
 add_arrow_test(public-api-test)

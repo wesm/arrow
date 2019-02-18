@@ -26,35 +26,40 @@
 
 namespace arrow {
 
+class TypeVisitor;
+
+class ExtensionTypeTraits {
+ public:
+  virtual ~ExtensionTypeTraits() = default;
+
+  /// \brief String representation suitable for printing
+  virtual std::string description() const = 0;
+};
+
 /// \brief The base class for custom / user-defined types.
-class ARROW_EXPORT ExtensionType : public DataType {
+class ARROW_EXPORT ExtensionType : public DataType, public ExtensionTypeTraits {
  public:
   std::shared_ptr<DataType> storage_type() const { return storage_type_; }
 
-  virtual std::string extension_name() const = 0;
+  std::string ToString() const override;
+  std::string name() const override;
 
  protected:
   explicit ExtensionType(std::shared_ptr<DataType> storage_type)
-    : DataType(Type::EXTENSION),
-      storage_type_(storage_type) {}
+      : DataType(Type::EXTENSION), storage_type_(storage_type) {}
 
   std::shared_ptr<DataType> storage_type_;
 };
 
 class ARROW_EXPORT ExtensionArray : public Array {
+ public:
+  /// \brief The physical storage for the extension array
+  std::shared_ptr<Array> storage() const { return storage_; }
+
  protected:
-  explicit ExtensionArray(const std::shared_ptr<ArrayData>& data) {
-    SetData(data);
-  }
+  explicit ExtensionArray(const std::shared_ptr<ArrayData>& data) { SetData(data); }
 
-  void SetData(const std::shared_ptr<ArrayData>& data) {
-    this->Array::SetData(data);
-
-    auto storage_data = data->Copy();
-    storage_data->type = (static_cast<const ExtensionType&>(data->type)
-                          ->storage_type());
-    storage_ = MakeArray(storage_data);
-  }
+  void SetData(const std::shared_ptr<ArrayData>& data);
 
   std::shared_ptr<Array> storage_;
 };
@@ -69,7 +74,7 @@ class ExtensionTypeAdapter {
   virtual Status Deserialize(const std::string& serialized,
                              std::shared_ptr<DataType>* out) = 0;
 
-  virtual std::string& Serialize(const ExtensionType& type) = 0;
+  virtual std::string Serialize(const ExtensionType& type) = 0;
 };
 
 /// \brief

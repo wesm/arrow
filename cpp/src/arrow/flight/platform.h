@@ -13,13 +13,12 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
+// under the License.
 
 #pragma once
 
-#include "arrow/flight/platform.h"  // IWYU pragma: keep
-
-// Need to include this first to get our gRPC customizations
-#include "arrow/flight/customize_protobuf.h"  // IWYU pragma: export
-
-#include "arrow/flight/Flight.grpc.pb.h"  // IWYU pragma: export
-#include "arrow/flight/Flight.pb.h"       // IWYU pragma: export
+// gRPC requires at least Windows Vista or higher. Setting Windows 7 minimum
+// here as a conservative minimum for Apache Arrow
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x600
+#endif

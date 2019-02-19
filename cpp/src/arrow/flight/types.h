@@ -26,8 +26,8 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/flight/visibility.h"
 #include "arrow/ipc/writer.h"
-#include "arrow/util/visibility.h"
 
 namespace arrow {
 
@@ -121,7 +121,7 @@ struct FlightPayload {
 
 /// \brief The access coordinates for retireval of a dataset, returned by
 /// GetFlightInfo
-class FlightInfo {
+class ARROW_FLIGHT_EXPORT FlightInfo {
  public:
   struct Data {
     std::string schema;
@@ -161,7 +161,7 @@ class FlightInfo {
 };
 
 /// \brief An iterator to FlightInfo instances returned by ListFlights
-class ARROW_EXPORT FlightListing {
+class ARROW_FLIGHT_EXPORT FlightListing {
  public:
   virtual ~FlightListing() = default;
 
@@ -173,7 +173,7 @@ class ARROW_EXPORT FlightListing {
 };
 
 /// \brief An iterator to Result instances returned by DoAction
-class ARROW_EXPORT ResultStream {
+class ARROW_FLIGHT_EXPORT ResultStream {
  public:
   virtual ~ResultStream() = default;
 
@@ -186,7 +186,7 @@ class ARROW_EXPORT ResultStream {
 
 // \brief Create a FlightListing from a vector of FlightInfo objects. This can
 // be iterated once, then it is consumed
-class ARROW_EXPORT SimpleFlightListing : public FlightListing {
+class ARROW_FLIGHT_EXPORT SimpleFlightListing : public FlightListing {
  public:
   explicit SimpleFlightListing(const std::vector<FlightInfo>& flights);
   explicit SimpleFlightListing(std::vector<FlightInfo>&& flights);
@@ -198,7 +198,7 @@ class ARROW_EXPORT SimpleFlightListing : public FlightListing {
   std::vector<FlightInfo> flights_;
 };
 
-class ARROW_EXPORT SimpleResultStream : public ResultStream {
+class ARROW_FLIGHT_EXPORT SimpleResultStream : public ResultStream {
  public:
   explicit SimpleResultStream(std::vector<Result>&& results);
   Status Next(std::unique_ptr<Result>* result) override;

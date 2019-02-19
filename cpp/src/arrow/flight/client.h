@@ -26,9 +26,9 @@
 
 #include "arrow/ipc/writer.h"
 #include "arrow/status.h"
-#include "arrow/util/visibility.h"
 
 #include "arrow/flight/types.h"  // IWYU pragma: keep
+#include "arrow/flight/visibility.h"
 
 namespace arrow {
 
@@ -41,7 +41,7 @@ namespace flight {
 
 /// \brief Client class for Arrow Flight RPC services (gRPC-based).
 /// API experimental for now
-class ARROW_EXPORT FlightClient {
+class ARROW_FLIGHT_EXPORT FlightClient {
  public:
   ~FlightClient();
 
@@ -113,7 +113,7 @@ class ARROW_EXPORT FlightClient {
 };
 
 /// \brief An interface to upload record batches to a Flight server
-class ARROW_EXPORT FlightPutWriter : public ipc::RecordBatchWriter {
+class ARROW_FLIGHT_EXPORT FlightPutWriter : public ipc::RecordBatchWriter {
  public:
   ~FlightPutWriter() override;
 

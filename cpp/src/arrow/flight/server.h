@@ -23,9 +23,8 @@
 #include <memory>
 #include <vector>
 
-#include "arrow/util/visibility.h"
-
 #include "arrow/flight/types.h"  // IWYU pragma: keep
+#include "arrow/flight/visibility.h"
 #include "arrow/record_batch.h"
 
 namespace arrow {
@@ -38,7 +37,7 @@ namespace flight {
 
 /// \brief Interface that produces a sequence of IPC payloads to be sent in
 /// FlightData protobuf messages
-class ARROW_EXPORT FlightDataStream {
+class ARROW_FLIGHT_EXPORT FlightDataStream {
  public:
   virtual ~FlightDataStream() = default;
 
@@ -52,7 +51,7 @@ class ARROW_EXPORT FlightDataStream {
 
 /// \brief A basic implementation of FlightDataStream that will provide
 /// a sequence of FlightData messages to be written to a gRPC stream
-class ARROW_EXPORT RecordBatchStream : public FlightDataStream {
+class ARROW_FLIGHT_EXPORT RecordBatchStream : public FlightDataStream {
  public:
   /// \param[in] reader produces a sequence of record batches
   explicit RecordBatchStream(const std::shared_ptr<RecordBatchReader>& reader);
@@ -66,7 +65,7 @@ class ARROW_EXPORT RecordBatchStream : public FlightDataStream {
 };
 
 /// \brief A reader for IPC payloads uploaded by a client
-class ARROW_EXPORT FlightMessageReader : public RecordBatchReader {
+class ARROW_FLIGHT_EXPORT FlightMessageReader : public RecordBatchReader {
  public:
   /// \brief Get the descriptor for this upload.
   virtual const FlightDescriptor& descriptor() const = 0;
@@ -74,7 +73,7 @@ class ARROW_EXPORT FlightMessageReader : public RecordBatchReader {
 
 /// \brief Skeleton RPC server implementation which can be used to create
 /// custom servers by implementing its abstract methods
-class ARROW_EXPORT FlightServerBase {
+class ARROW_FLIGHT_EXPORT FlightServerBase {
  public:
   FlightServerBase();
   virtual ~FlightServerBase();

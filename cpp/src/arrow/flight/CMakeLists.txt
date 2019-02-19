@@ -21,12 +21,18 @@ add_custom_target(arrow_flight)
 arrow_install_all_headers("arrow/flight")
 
 set(ARROW_FLIGHT_STATIC_LINK_LIBS
-    ${PROTOBUF_LIBRARY}
     grpc_grpcpp_static
     grpc_grpc_static
     grpc_gpr_static
     grpc_address_sorting_static
+    ${PROTOBUF_LIBRARY}
+    ${ZLIB_LIBRARY}
     cares_static)
+
+if (WIN32)
+  list(APPEND ARROW_FLIGHT_STATIC_LINK_LIBS
+    Ws2_32.lib)
+endif()
 
 set(ARROW_FLIGHT_TEST_LINK_LIBS
     arrow_flight_shared
@@ -73,6 +79,8 @@ set(ARROW_FLIGHT_SRCS
     types.cc)
 
 add_arrow_lib(arrow_flight
+              OUTPUTS
+              ARROW_FLIGHT_LIBRARIES
               SOURCES
               ${ARROW_FLIGHT_SRCS}
               DEPENDENCIES
@@ -84,6 +92,10 @@ add_arrow_lib(arrow_flight
               STATIC_LINK_LIBS
               arrow_static
               ${ARROW_FLIGHT_STATIC_LINK_LIBS})
+
+foreach(LIB_TARGET ${ARROW_FLIGHT_LIBRARIES})
+  target_compile_definitions(${LIB_TARGET} PRIVATE ARROW_FLIGHT_EXPORTING)
+endforeach()
 
 # Define arrow_flight_testing library
 if(ARROW_BUILD_TESTS OR ARROW_BUILD_BENCHMARKS)

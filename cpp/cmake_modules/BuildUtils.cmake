@@ -108,6 +108,7 @@ function(ADD_ARROW_LIB LIB_NAME)
   set(options BUILD_SHARED BUILD_STATIC)
   set(one_value_args SHARED_LINK_FLAGS)
   set(multi_value_args SOURCES OUTPUTS
+                       COMPILE_DEFINITIONS
                        STATIC_LINK_LIBS
                        SHARED_LINK_LIBS
                        SHARED_PRIVATE_LINK_LIBS

@@ -1338,6 +1338,10 @@ if (ARROW_WITH_PROTOBUF)
 
   include_directories (SYSTEM ${PROTOBUF_INCLUDE_DIR})
   if (ARROW_PROTOBUF_USE_SHARED)
+    if (MSVC)
+      # This definition is required to use protobuf shared libraries in MSVC
+      add_definitions(-DPROTOBUF_USE_DLLS)
+    endif()
     ADD_THIRDPARTY_LIB(protobuf
       SHARED_LIB ${PROTOBUF_SHARED_LIB})
     set(PROTOBUF_LIBRARY protobuf_shared)

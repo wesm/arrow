@@ -23,6 +23,7 @@
 #include "arrow/status.h"
 
 #include "arrow/flight/types.h"
+#include "arrow/flight/visibility.h"
 
 namespace boost {
 namespace process {
@@ -38,7 +39,7 @@ namespace flight {
 // ----------------------------------------------------------------------
 // Fixture to use for running test servers
 
-class ARROW_EXPORT TestServer {
+class ARROW_FLIGHT_EXPORT TestServer {
  public:
   explicit TestServer(const std::string& executable_name, int port)
       : executable_name_(executable_name), port_(port) {}
@@ -100,18 +101,18 @@ inline std::shared_ptr<Schema> ExampleSchema2() {
   return ::arrow::schema({f0, f1});
 }
 
-ARROW_EXPORT
+ARROW_FLIGHT_EXPORT
 Status MakeFlightInfo(const Schema& schema, const FlightDescriptor& descriptor,
                       const std::vector<FlightEndpoint>& endpoints, int64_t total_records,
                       int64_t total_bytes, FlightInfo::Data* out);
 
-ARROW_EXPORT
+ARROW_FLIGHT_EXPORT
 std::vector<FlightInfo> ExampleFlightInfo();
 
-ARROW_EXPORT
+ARROW_FLIGHT_EXPORT
 Status SimpleIntegerBatches(const int num_batches, BatchVector* out);
 
-ARROW_EXPORT
+ARROW_FLIGHT_EXPORT
 std::vector<ActionType> ExampleActionTypes();
 
 }  // namespace flight

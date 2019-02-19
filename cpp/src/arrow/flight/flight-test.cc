@@ -37,7 +37,7 @@
 #error "gRPC headers should not be in public API"
 #endif
 
-#include "arrow/flight/Flight.pb.h"
+#include "arrow/flight/protocol.h"
 #include "arrow/flight/internal.h"
 #include "arrow/flight/test-util.h"
 

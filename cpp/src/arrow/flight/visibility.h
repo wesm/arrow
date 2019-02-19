@@ -13,13 +13,36 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
+// under the License.
 
 #pragma once
 
-#include "arrow/flight/platform.h"  // IWYU pragma: keep
+#if defined(_WIN32) || defined(__CYGWIN__)
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#else
+#pragma GCC diagnostic ignored "-Wattributes"
+#endif
 
-// Need to include this first to get our gRPC customizations
-#include "arrow/flight/customize_protobuf.h"  // IWYU pragma: export
+#ifdef ARROW_FLIGHT_STATIC
+#define ARROW_FLIGHT_EXPORT
+#elif defined(ARROW_FLIGHT_EXPORTING)
+#define ARROW_FLIGHT_EXPORT __declspec(dllexport)
+#else
+#define ARROW_FLIGHT_EXPORT __declspec(dllimport)
+#endif
 
-#include "arrow/flight/Flight.grpc.pb.h"  // IWYU pragma: export
-#include "arrow/flight/Flight.pb.h"       // IWYU pragma: export
+#define ARROW_FLIGHT_NO_EXPORT
+#else  // Not Windows
+#ifndef ARROW_FLIGHT_EXPORT
+#define ARROW_FLIGHT_EXPORT __attribute__((visibility("default")))
+#endif
+#ifndef ARROW_FLIGHT_NO_EXPORT
+#define ARROW_FLIGHT_NO_EXPORT __attribute__((visibility("hidden")))
+#endif
+#endif  // Non-Windows
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif

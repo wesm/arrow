@@ -152,12 +152,19 @@ Status Message::ReadFrom(const std::shared_ptr<Buffer>& metadata, io::InputStrea
 
   int64_t body_length = fb_message->bodyLength();
 
+  int64_t position = 0;
+  RETURN_NOT_OK(stream->Tell(&position));
+  std::cout << "About to read body, file at offset: " << position << std::endl;
+
   std::shared_ptr<Buffer> body;
   RETURN_NOT_OK(stream->Read(body_length, &body));
   if (body->size() < body_length) {
     return Status::IOError("Expected to be able to read ", body_length,
                            " bytes for message body, got ", body->size());
   }
+
+  RETURN_NOT_OK(stream->Tell(&position));
+  std::cout << "Read message body, file at offset: " << position << std::endl;
 
   return Message::Open(metadata, body, out);
 }
@@ -279,6 +286,10 @@ Status CheckAligned(io::FileInterface* stream, int32_t alignment) {
 }
 
 Status ReadMessage(io::InputStream* file, std::unique_ptr<Message>* message) {
+  int64_t position = 0;
+  RETURN_NOT_OK(file->Tell(&position));
+  std::cout << "File is at offset: " << position << std::endl;
+
   int32_t message_length = 0;
   int64_t bytes_read = 0;
   RETURN_NOT_OK(file->Read(sizeof(int32_t), &bytes_read,
@@ -294,6 +305,8 @@ Status ReadMessage(io::InputStream* file, std::unique_ptr<Message>* message) {
     *message = nullptr;
     return Status::OK();
   }
+
+  std::cout << "Message length: " << message_length << std::endl;
 
   std::shared_ptr<Buffer> metadata;
   RETURN_NOT_OK(file->Read(message_length, &metadata));

@@ -43,6 +43,9 @@ class Message::MessageImpl {
       : metadata_(metadata), message_(nullptr), body_(body) {}
 
   Status Open() {
+    std::cout << "Opening a Message flatbuffer with size " << metadata_->size()
+              << std::endl;
+
     message_ = flatbuf::GetMessage(metadata_->data());
 
     // Check that the metadata version is supported

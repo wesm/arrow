@@ -1947,6 +1947,14 @@ macro(build_grpc)
       "-DProtobuf_PROTOC_LIBRARY=${GRPC_Protobuf_PROTOC_LIBRARY}"
       -DBUILD_SHARED_LIBS=OFF)
 
+  if (c-aresAlt_FOUND)
+    # ARROW-5192: gRPC cannot find the c-ares libcares.pc file produced by its
+    # autotools build used un Debian and Fedora packages, so we don't trust
+    # that we might have a .cmake config available
+    list(APPEND GRPC_CMAKE_ARGS "-D_gRPC_CARES_LIBRARIES=${CARES_LIB}")
+    list(APPEND GRPC_CMAKE_ARGS "-D_gRPC_CARES_INCLUDE_DIR=${CARES_INCLUDE_DIR}")
+  endif()
+
   # XXX the gRPC git checkout is huge and takes a long time
   # Ideally, we should be able to use the tarballs, but they don't contain
   # vendored dependencies such as c-ares...

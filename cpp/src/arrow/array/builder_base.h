@@ -120,6 +120,14 @@ class ARROW_EXPORT ArrayBuilder {
   /// \return Status
   Status Finish(std::shared_ptr<Array>* out);
 
+  template <typename ArrayType>
+  Status Finish(std::shared_ptr<ArrayType>* out) {
+    std::shared_ptr<Array> out_untyped;
+    ARROW_RETURN_NOT_OK(Finish(&out_untyped));
+    *out = std::static_pointer_cast<ArrayType>(std::move(out_untyped));
+    return Status::OK();
+  }
+
   std::shared_ptr<DataType> type() const { return type_; }
 
  protected:

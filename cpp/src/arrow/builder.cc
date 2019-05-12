@@ -40,44 +40,6 @@ class MemoryPool;
     out->reset(new BuilderType(type, pool)); \
     return Status::OK();
 
-struct DictionaryBuilderCase {
-  template <typename ValueType>
-  Status Visit(const ValueType&, typename ValueType::c_type* = nullptr) {
-    return CreateFor<ValueType>();
-  }
-
-  Status Visit(const BinaryType&) { return Create<BinaryDictionaryBuilder>(); }
-  Status Visit(const StringType&) { return Create<StringDictionaryBuilder>(); }
-  Status Visit(const FixedSizeBinaryType&) { return CreateFor<FixedSizeBinaryType>(); }
-
-  Status Visit(const DataType& value_type) { return NotImplemented(value_type); }
-  Status Visit(const HalfFloatType& value_type) { return NotImplemented(value_type); }
-  Status NotImplemented(const DataType& value_type) {
-    return Status::NotImplemented(
-        "MakeBuilder: cannot construct builder for dictionaries with value type ",
-        value_type);
-  }
-
-  template <typename ValueType>
-  Status CreateFor() {
-    return Create<DictionaryBuilder<ValueType>>();
-  }
-
-  template <typename BuilderType>
-  Status Create() {
-    out->reset(new BuilderType(dict_type.dictionary(), pool));
-    return Status::OK();
-  }
-
-  MemoryPool* pool;
-  const DictionaryType& dict_type;
-  std::unique_ptr<ArrayBuilder>* out;
-};
-
-// Initially looked at doing this with vtables, but shared pointers makes it
-// difficult
-//
-// TODO(wesm): come up with a less monolithic strategy
 Status MakeBuilder(MemoryPool* pool, const std::shared_ptr<DataType>& type,
                    std::unique_ptr<ArrayBuilder>* out) {
   switch (type->id()) {
@@ -107,9 +69,9 @@ Status MakeBuilder(MemoryPool* pool, const std::shared_ptr<DataType>& type,
       BUILDER_CASE(FIXED_SIZE_BINARY, FixedSizeBinaryBuilder);
       BUILDER_CASE(DECIMAL, Decimal128Builder);
     case Type::DICTIONARY: {
-      const auto& dict_type = static_cast<const DictionaryType&>(*type);
-      DictionaryBuilderCase visitor = {pool, dict_type, out};
-      return VisitTypeInline(*dict_type.dictionary()->type(), &visitor);
+      return Status::NotImplemented(
+          "Use MakeDictionaryBuilder for dictionary-encoded"
+          " arrays");
     }
     case Type::LIST: {
       std::unique_ptr<ArrayBuilder> value_builder;
@@ -146,6 +108,48 @@ Status MakeBuilder(MemoryPool* pool, const std::shared_ptr<DataType>& type,
                                     type->ToString());
     }
   }
+}
+
+struct DictionaryBuilderCase {
+  template <typename ValueType>
+  Status Visit(const ValueType&, typename ValueType::c_type* = nullptr) {
+    return CreateFor<ValueType>();
+  }
+
+  Status Visit(const BinaryType&) { return Create<BinaryDictionaryBuilder>(); }
+  Status Visit(const StringType&) { return Create<StringDictionaryBuilder>(); }
+  Status Visit(const FixedSizeBinaryType&) { return CreateFor<FixedSizeBinaryType>(); }
+
+  Status Visit(const DataType& value_type) { return NotImplemented(value_type); }
+  Status Visit(const HalfFloatType& value_type) { return NotImplemented(value_type); }
+  Status NotImplemented(const DataType& value_type) {
+    return Status::NotImplemented(
+        "MakeBuilder: cannot construct builder for dictionaries with value type ",
+        value_type);
+  }
+
+  template <typename ValueType>
+  Status CreateFor() {
+    return Create<DictionaryBuilder<ValueType>>();
+  }
+
+  template <typename BuilderType>
+  Status Create() {
+    out->reset(new BuilderType(dictionary, pool));
+    return Status::OK();
+  }
+
+  MemoryPool* pool;
+  const std::shared_ptr<Array>& dictionary;
+  std::unique_ptr<ArrayBuilder>* out;
+};
+
+Status MakeDictionaryBuilder(MemoryPool* pool, const std::shared_ptr<DataType>& type,
+                             const std::shared_ptr<Array>& dictionary,
+                             std::unique_ptr<ArrayBuilder>* out) {
+  const auto& dict_type = static_cast<const DictionaryType&>(*type);
+  DictionaryBuilderCase visitor = {pool, dictionary, out};
+  return VisitTypeInline(*dict_type.value_type(), &visitor);
 }
 
 }  // namespace arrow

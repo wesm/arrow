@@ -52,8 +52,8 @@ namespace ipc {
 namespace internal {
 namespace json {
 
-using ::arrow::ipc::DictionaryMemo;
-using ::arrow::ipc::DictionaryTypeMap;
+using ::arrow::ipc::internal::DictionaryMemo;
+using ::arrow::ipc::internal::DictionaryTypeMap;
 
 static std::string GetFloatingPrecisionName(FloatingPoint::Precision precision) {
   switch (precision) {
@@ -87,8 +87,9 @@ static std::string GetTimeUnitName(TimeUnit::type unit) {
 
 class SchemaWriter {
  public:
-  explicit SchemaWriter(const Schema& schema, RjWriter* writer)
-      : schema_(schema), writer_(writer) {}
+  explicit SchemaWriter(const Schema& schema, const DictionaryMemo& dictionary_memo,
+                        RjWriter* writer)
+      : schema_(schema), dictionary_memo_(dictionary_memo), writer_(writer) {}
 
   Status Write() {
     writer_->Key("schema");
@@ -128,7 +129,8 @@ class SchemaWriter {
   }
 
   Status WriteDictionaryMetadata(const DictionaryType& type) {
-    int64_t dictionary_id = dictionary_memo_.GetId(type.dictionary());
+    int64_t dictionary_id;
+    RETURN_NOT_OK(dictionary_memo_.GetId(type, &dictionary_id));
     writer_->Key("dictionary");
 
     // Emulate DictionaryEncoding from Schema.fbs
@@ -168,9 +170,7 @@ class SchemaWriter {
     if (type.id() == Type::DICTIONARY) {
       const auto& dict_type = checked_cast<const DictionaryType&>(type);
       RETURN_NOT_OK(WriteDictionaryMetadata(dict_type));
-
-      const DataType& dictionary_type = *dict_type.dictionary()->type();
-      RETURN_NOT_OK(WriteChildren(dictionary_type.children()));
+      RETURN_NOT_OK(WriteChildren(dict_type.value_type()->children()));
     } else {
       RETURN_NOT_OK(WriteChildren(type.children()));
     }
@@ -349,17 +349,14 @@ class SchemaWriter {
     return Status::OK();
   }
 
-  Status Visit(const DictionaryType& type) {
-    return VisitType(*type.dictionary()->type());
-  }
+  Status Visit(const DictionaryType& type) { return VisitType(*type.value_type()); }
 
   // Default case
   Status Visit(const DataType& type) { return Status::NotImplemented(type.name()); }
 
  private:
-  DictionaryMemo dictionary_memo_;
-
   const Schema& schema_;
+  const DictionaryMemo& dictionary_memo_;
   RjWriter* writer_;
 };
 
@@ -923,7 +920,8 @@ static Status GetField(const rj::Value& obj, const DictionaryMemo* dictionary_me
 
   const auto& it_dictionary = json_field.FindMember("dictionary");
   if (dictionary_memo != nullptr && it_dictionary != json_field.MemberEnd()) {
-    // Field is dictionary encoded. We must have already
+    // Parse dictionary id in JSON and look up dictionary previously
+    // parsed
     RETURN_NOT_OBJECT("dictionary", it_dictionary, json_field);
     int64_t dictionary_id = -1;
     bool is_ordered;
@@ -933,8 +931,7 @@ static Status GetField(const rj::Value& obj, const DictionaryMemo* dictionary_me
 
     std::shared_ptr<Array> dictionary;
     RETURN_NOT_OK(dictionary_memo->GetDictionary(dictionary_id, &dictionary));
-
-    type = std::make_shared<DictionaryType>(index_type, dictionary, is_ordered);
+    type = ::arrow::dictionary(index_type, dictionary->type(), is_ordered);
   } else {
     // If the dictionary_memo was not passed, or if the field is not dictionary
     // encoded, we are interested in the complete type including all children
@@ -985,8 +982,11 @@ UnboxValue(const rj::Value& val) {
 class ArrayReader {
  public:
   explicit ArrayReader(const rj::Value& json_array, const std::shared_ptr<DataType>& type,
-                       MemoryPool* pool)
-      : json_array_(json_array), type_(type), pool_(pool) {}
+                       const DictionaryMemo& dictionary_memo, MemoryPool* pool)
+      : json_array_(json_array),
+        type_(type),
+        dictionary_memo_(dictionary_memo),
+        pool_(pool) {}
 
   Status ParseTypeValues(const DataType& type);
 
@@ -1266,7 +1266,15 @@ class ArrayReader {
     type_ = type.index_type();
     RETURN_NOT_OK(ParseTypeValues(*type_));
     type_ = dict_type;
-    result_ = std::make_shared<DictionaryArray>(type_, result_);
+
+    // Look up dictionary
+    int64_t dictionary_id = -1;
+    RETURN_NOT_OK(dictionary_memo_.GetId(type, &dictionary_id));
+
+    std::shared_ptr<Array> dictionary;
+    RETURN_NOT_OK(dictionary_memo_.GetDictionary(dictionary_id, &dictionary));
+
+    result_ = std::make_shared<DictionaryArray>(type_, dictionary, result_);
     return Status::OK();
   }
 
@@ -1295,7 +1303,8 @@ class ArrayReader {
 
       DCHECK_EQ(it->value.GetString(), child_field->name());
       std::shared_ptr<Array> child;
-      RETURN_NOT_OK(ReadArray(pool_, json_children_arr[i], child_field->type(), &child));
+      RETURN_NOT_OK(ReadArray(pool_, json_children_arr[i], child_field->type(),
+                              dictionary_memo_, &child));
       array->emplace_back(child);
     }
 
@@ -1331,6 +1340,7 @@ class ArrayReader {
   const rj::Value& json_array_;
   const RjObject* obj_;
   std::shared_ptr<DataType> type_;
+  const DictionaryMemo& dictionary_memo_;
   MemoryPool* pool_;
 
   // Parsed common attributes
@@ -1343,8 +1353,9 @@ Status ArrayReader::ParseTypeValues(const DataType& type) {
   return VisitTypeInline(type, this);
 }
 
-Status WriteSchema(const Schema& schema, RjWriter* json_writer) {
-  SchemaWriter converter(schema, json_writer);
+Status WriteSchema(const Schema& schema, const DictionaryMemo& dictionary_memo,
+                   RjWriter* json_writer) {
+  SchemaWriter converter(schema, dictionary_memo, json_writer);
   return converter.Write();
 }
 
@@ -1389,12 +1400,13 @@ static Status ReadDictionary(const RjObject& obj, const DictionaryTypeMap& id_to
   }
   std::vector<std::shared_ptr<Field>> fields = {it->second};
 
-  // We need a schema for the record batch
+  // We need placeholder schema and dictionary memo to read the record batch
   auto dummy_schema = std::make_shared<Schema>(fields);
+  DictionaryMemo dummy_memo;
 
   // The dictionary is embedded in a record batch with a single column
   std::shared_ptr<RecordBatch> batch;
-  RETURN_NOT_OK(ReadRecordBatch(it_data->value, dummy_schema, pool, &batch));
+  RETURN_NOT_OK(ReadRecordBatch(it_data->value, dummy_schema, dummy_memo, pool, &batch));
 
   if (batch->num_columns() != 1) {
     return Status::Invalid("Dictionary record batch must only contain one field");
@@ -1429,7 +1441,7 @@ static Status ReadDictionaries(const rj::Value& doc, const DictionaryTypeMap& id
 }
 
 Status ReadSchema(const rj::Value& json_schema, MemoryPool* pool,
-                  std::shared_ptr<Schema>* schema) {
+                  DictionaryMemo* dictionary_memo, std::shared_ptr<Schema>* schema) {
   auto it = json_schema.FindMember("schema");
   RETURN_NOT_OBJECT("schema", it, json_schema);
   const auto& obj_schema = it->value.GetObject();
@@ -1442,18 +1454,18 @@ Status ReadSchema(const rj::Value& json_schema, MemoryPool* pool,
   RETURN_NOT_OK(GetDictionaryTypes(it_fields->value.GetArray(), &dictionary_types));
 
   // Read the dictionaries (if any) and cache in the memo
-  DictionaryMemo dictionary_memo;
-  RETURN_NOT_OK(ReadDictionaries(json_schema, dictionary_types, pool, &dictionary_memo));
+  RETURN_NOT_OK(ReadDictionaries(json_schema, dictionary_types, pool, dictionary_memo));
 
   std::vector<std::shared_ptr<Field>> fields;
-  RETURN_NOT_OK(GetFieldsFromArray(it_fields->value, &dictionary_memo, &fields));
+  RETURN_NOT_OK(GetFieldsFromArray(it_fields->value, dictionary_memo, &fields));
 
   *schema = std::make_shared<Schema>(fields);
   return Status::OK();
 }
 
 Status ReadRecordBatch(const rj::Value& json_obj, const std::shared_ptr<Schema>& schema,
-                       MemoryPool* pool, std::shared_ptr<RecordBatch>* batch) {
+                       const DictionaryMemo& dictionary_memo, MemoryPool* pool,
+                       std::shared_ptr<RecordBatch>* batch) {
   DCHECK(json_obj.IsObject());
   const auto& batch_obj = json_obj.GetObject();
 
@@ -1468,7 +1480,7 @@ Status ReadRecordBatch(const rj::Value& json_obj, const std::shared_ptr<Schema>&
   std::vector<std::shared_ptr<Array>> columns(json_columns.Size());
   for (int i = 0; i < static_cast<int>(columns.size()); ++i) {
     const std::shared_ptr<DataType>& type = schema->field(i)->type();
-    RETURN_NOT_OK(ReadArray(pool, json_columns[i], type, &columns[i]));
+    RETURN_NOT_OK(ReadArray(pool, json_columns[i], type, dictionary_memo, &columns[i]));
   }
 
   *batch = RecordBatch::Make(schema, num_rows, columns);
@@ -1503,13 +1515,14 @@ Status WriteArray(const std::string& name, const Array& array, RjWriter* json_wr
 }
 
 Status ReadArray(MemoryPool* pool, const rj::Value& json_array,
-                 const std::shared_ptr<DataType>& type, std::shared_ptr<Array>* array) {
-  ArrayReader converter(json_array, type, pool);
+                 const std::shared_ptr<DataType>& type,
+                 const DictionaryMemo& dictionary_memo, std::shared_ptr<Array>* array) {
+  ArrayReader converter(json_array, type, dictionary_memo, pool);
   return converter.GetArray(array);
 }
 
 Status ReadArray(MemoryPool* pool, const rj::Value& json_array, const Schema& schema,
-                 std::shared_ptr<Array>* array) {
+                 const DictionaryMemo& dictionary_memo, std::shared_ptr<Array>* array) {
   if (!json_array.IsObject()) {
     return Status::Invalid("Element was not a JSON object");
   }
@@ -1520,20 +1533,12 @@ Status ReadArray(MemoryPool* pool, const rj::Value& json_array, const Schema& sc
   RETURN_NOT_STRING("name", it_name, json_obj);
 
   std::string name = it_name->value.GetString();
-
-  std::shared_ptr<Field> result = nullptr;
-  for (const std::shared_ptr<Field>& field : schema.fields()) {
-    if (field->name() == name) {
-      result = field;
-      break;
-    }
-  }
-
+  std::shared_ptr<Field> result = schema.GetFieldByName(name);
   if (result == nullptr) {
     return Status::KeyError("Field named ", name, " not found in schema");
   }
 
-  return ReadArray(pool, json_array, result->type(), array);
+  return ReadArray(pool, json_array, result->type(), dictionary_memo, array);
 }
 
 }  // namespace json

@@ -52,8 +52,6 @@ namespace ipc {
 namespace internal {
 namespace json {
 
-using ::arrow::ipc::internal::DictionaryMemo;
-
 static std::string GetFloatingPrecisionName(FloatingPoint::Precision precision) {
   switch (precision) {
     case FloatingPoint::HALF:

@@ -291,6 +291,8 @@ class ARROW_EXPORT Field {
   /// \brief Return whether the field is nullable
   bool nullable() const { return nullable_; }
 
+  std::shared_ptr<Field> Copy() const;
+
  private:
   // Field name
   std::string name_;
@@ -303,6 +305,8 @@ class ARROW_EXPORT Field {
 
   // The field's metadata, if any
   std::shared_ptr<const KeyValueMetadata> metadata_;
+
+  ARROW_DISALLOW_COPY_AND_ASSIGN(Field);
 };
 
 namespace detail {

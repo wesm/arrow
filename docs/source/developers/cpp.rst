@@ -489,7 +489,7 @@ work). You can build them using the following code:
 
 .. code-block:: shell
 
-   cmake -DARROW_FUZZING=ON -DARROW_USE_ASAN=ON ..
+   cmake -DCMAKE_BUILD_TYPE=debug -DARROW_FUZZING=ON -DARROW_USE_ASAN=ON ..
 
 ``ARROW_FUZZING`` will enable building of fuzzer executables as well as enable the
 addition of coverage helpers via ``ARROW_USE_COVERAGE``, so that the fuzzer can observe
@@ -505,7 +505,7 @@ Now you can start one of the fuzzer, e.g.:
 
 .. code-block:: shell
 
-   ./debug/debug/ipc-fuzzing-test
+   ./debug/arrow-ipc-fuzzing-test
 
 This will try to find a malformed input that crashes the payload and will show the
 stack trace as well as the input data. After a problem was found this way, it should

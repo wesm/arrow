@@ -285,6 +285,10 @@ endif()
 
 if(NOT ARROW_FUZZING)
   set(NO_FUZZING 1)
+else()
+  # With recent LLVM versions libFuzzer does not work properly with gnu-ld
+  # https://bugs.llvm.org/show_bug.cgi?id=34636
+  # set(ARROW_USE_LD_GOLD 1)
 endif()
 
 if(MSVC

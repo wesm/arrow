@@ -143,7 +143,6 @@ class DataPageV2 : public DataPage {
   int32_t definition_levels_byte_length_;
   int32_t repetition_levels_byte_length_;
   bool is_compressed_;
-
   // TODO(wesm): format::DataPageHeaderV2.statistics
 };
 

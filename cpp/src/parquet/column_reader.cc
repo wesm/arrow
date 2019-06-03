@@ -189,24 +189,28 @@ std::shared_ptr<Page> SerializedPageReader::NextPage() {
       ParquetException::EofException(ss.str());
     }
 
-    // Uncompress it if we need to
-    if (decompressor_ != nullptr) {
-      // Grow the uncompressed buffer if we need to.
-      if (uncompressed_len > static_cast<int>(decompression_buffer_->size())) {
-        PARQUET_THROW_NOT_OK(decompression_buffer_->Resize(uncompressed_len, false));
+    auto MaybeDecompress = [&](const uint8_t* data,
+                               std::shared_ptr<Buffer>* out) {
+      // Uncompress it if we need to
+      if (decompressor_ != nullptr) {
+        // Grow the uncompressed buffer if we need to.
+        if (uncompressed_len > static_cast<int>(decompression_buffer_->size())) {
+          PARQUET_THROW_NOT_OK(decompression_buffer_->Resize(uncompressed_len, false));
+        }
+        PARQUET_THROW_NOT_OK(
+            decompressor_->Decompress(compressed_len, data, uncompressed_len,
+                                      decompression_buffer_->mutable_data()));
+        *out;
       }
-      PARQUET_THROW_NOT_OK(
-          decompressor_->Decompress(compressed_len, page_buffer->data(), uncompressed_len,
-                                    decompression_buffer_->mutable_data()));
-      page_buffer = decompression_buffer_;
-    }
+    };
+
 
     if (current_page_header_.type == format::PageType::DICTIONARY_PAGE) {
       const format::DictionaryPageHeader& dict_header =
           current_page_header_.dictionary_page_header;
 
       bool is_sorted = dict_header.__isset.is_sorted ? dict_header.is_sorted : false;
-
+      MaybeDecompress(page_buffer->data(), &page_buffer);
       return std::make_shared<DictionaryPage>(page_buffer, dict_header.num_values,
                                               FromThrift(dict_header.encoding),
                                               is_sorted);
@@ -232,6 +236,8 @@ std::shared_ptr<Page> SerializedPageReader::NextPage() {
 
       seen_num_rows_ += header.num_values;
 
+      MaybeDecompress(page_buffer->data(), &page_buffer);
+
       return std::make_shared<DataPageV1>(
           page_buffer, header.num_values, FromThrift(header.encoding),
           FromThrift(header.definition_level_encoding),
@@ -241,6 +247,15 @@ std::shared_ptr<Page> SerializedPageReader::NextPage() {
       bool is_compressed = header.__isset.is_compressed ? header.is_compressed : false;
 
       seen_num_rows_ += header.num_values;
+
+      std::shared_ptr<Buffer> data_buffer;
+      const int64_t data_offset = (header.definition_levels_byte_length +
+                                   header.repetition_levels_byte_length);
+      if (is_compressed) {
+        MaybeDecompress(page_buffer->data() + data_offset, &data_buffer);
+      } else {
+        data_buffer = ::arrow::SliceBuffer(page_buffer, data_buffer);
+      }
 
       return std::make_shared<DataPageV2>(
           page_buffer, header.num_values, header.num_nulls, header.num_rows,

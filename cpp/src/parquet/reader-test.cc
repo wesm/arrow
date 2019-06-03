@@ -229,6 +229,18 @@ TEST(TestFileReaderAdHoc, NationDictTruncatedDataPage) {
   ASSERT_EQ(ss2.str(), ss.str());
 }
 
+TEST(TestFileReaderAdHoc, CanReadDataPageV2) {
+  // PARQUET-458
+  auto reader = ParquetFileReader::OpenFile(data_file("datapage_v2.snappy.parquet"),
+                                            false);
+  std::stringstream ss;
+
+  // empty list means print all
+  std::list<int> columns;
+  ParquetFilePrinter printer1(reader.get());
+  printer1.DebugPrint(ss, {}, true);
+}
+
 TEST(TestDumpWithLocalFile, DumpOutput) {
   std::string header_output = R"###(File Name: nested_lists.snappy.parquet
 Version: 1.0

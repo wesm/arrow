@@ -22,6 +22,19 @@ include "Tensor.fbs";
 namespace org.apache.arrow.flatbuf;
 
 /// ----------------------------------------------------------------------
+/// A Buffer represents a single contiguous memory segment
+
+struct Buffer {
+  /// The relative offset into the shared memory page where the bytes for this
+  /// buffer starts
+  offset: long;
+
+  /// The absolute length (in bytes) of the memory buffer. The memory is found
+  /// from offset (inclusive) to offset + length (non-inclusive).
+  length: long;
+}
+
+/// ----------------------------------------------------------------------
 /// Data structures for describing a table row batch (a collection of
 /// equal-length Arrow arrays)
 

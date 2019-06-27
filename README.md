@@ -17,12 +17,16 @@
   under the License.
 -->
 
+
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fwesm%2Farrow.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fwesm%2Farrow?ref=badge_large)
+
 # Apache Arrow
 
 [![Build Status](https://travis-ci.org/apache/arrow.svg?branch=master)](https://travis-ci.org/apache/arrow)
 [![Coverage Status](https://codecov.io/gh/apache/arrow/branch/master/graph/badge.svg)](https://codecov.io/gh/apache/arrow?branch=master)
 [![License](http://img.shields.io/:license-Apache%202-blue.svg)](https://github.com/apache/arrow/blob/master/LICENSE.txt)
 [![Twitter Follow](https://img.shields.io/twitter/follow/apachearrow.svg?style=social&label=Follow)](https://twitter.com/apachearrow)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fwesm%2Farrow.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fwesm%2Farrow?ref=badge_shield)
 
 ## Powering In-Memory Analytics
 

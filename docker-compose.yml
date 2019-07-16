@@ -422,16 +422,12 @@ services:
 
   lint:
     # Usage:
-    #   export PYTHON_VERSION=3.6
-    #   docker-compose build cpp
-    #   docker-compose build python
     #   docker-compose build lint
     #   docker-compose run lint
     image: arrow:lint
     build:
       context: .
       dockerfile: dev/lint/Dockerfile
-    command: arrow/dev/lint/run_linters.sh
     volumes: *ubuntu-volumes
 
   fuzzit:

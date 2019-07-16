@@ -30,7 +30,7 @@ RAT="java -jar apache-rat-${RAT_VERSION}.jar -x "
 RELEASE_DIR=$(cd "$(dirname "$BASH_SOURCE")"; pwd)
 
 # generate the rat report
-$RAT $1 > rat.txt
+$RAT $1 > rat.txt || exit 1
 python $RELEASE_DIR/check-rat-report.py $RELEASE_DIR/rat_exclude_files.txt rat.txt > filtered_rat.txt
 cat filtered_rat.txt
 UNAPPROVED=`cat filtered_rat.txt  | grep "NOT APPROVED" | wc -l`

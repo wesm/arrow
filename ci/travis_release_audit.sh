@@ -21,6 +21,7 @@ set -e
 
 # Check licenses according to Apache policy
 git archive HEAD --prefix=apache-arrow-raw/ | tar xf -
-cp -r -L apache-arrow{-raw,}
+cp -r -L apache-arrow-raw apache-arrow
 tar czf arrow-src.tar.gz apache-arrow
-./dev/release/run-rat.sh arrow-src.tar.gz
+rm -rf apache-arrow
+./dev/release/run-rat.sh arrow-src.tar.gz || exit 1

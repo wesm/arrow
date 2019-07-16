@@ -15,19 +15,38 @@
 # specific language governing permissions and limitations
 # under the License.
 
-FROM arrow:python-3.6
+FROM openjdk:8-jre-slim-stretch
 
-RUN apt-get update && \
-    apt-get install -y -q \
-      clang-7 \
-      libclang-7-dev \
-      clang-format-7 \
-      clang-tidy-7 \
-      clang-tools-7
+# install build essentials
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update -y -q && \
+    apt-get install -y -q --no-install-recommends \
+        apt-transport-https \
+        ca-certificates \
+        wget \
+        software-properties-common \
+        gnupg \
+        gnupg2 && \
+    wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && \
+    apt-add-repository -y "deb http://apt.llvm.org/stretch/ llvm-toolchain-stretch-7 main" && \
+    apt-get update -y -q && \
+    apt-get install -y -q --no-install-recommends \
+        cmake \
+        git \
+        make \
+        pkg-config \
+        wget \
+        clang-7 \
+        clang-format-7 \
+        clang-tidy-7 \
+        clang-tools-7 \
+        python3-pip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN conda install flake8 && \
-    conda clean --all -y
+WORKDIR /
 
-ENV PATH=/opt/iwyu/bin:$PATH
-ADD ci/docker_install_iwyu.sh /arrow/ci/
-RUN arrow/ci/docker_install_iwyu.sh
+ENV CC=clang-7 \
+    CXX=clang++-7
+
+CMD ["arrow/ci/docker_lint.sh"]

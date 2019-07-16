@@ -73,7 +73,8 @@ def run_cmake_format(paths):
     # necessary
     # autosort is off because it breaks in cmake_format 5.1
     #   See: https://github.com/cheshirekow/cmake_format/issues/111
-    cmd = ['cmake-format', '--in-place', '--autosort=false'] + paths
+    cmd = (['cmake-format', '--in-place', '--autosort=false'] +
+           [str(x) for x in paths])
     try:
         subprocess.run(cmd, check=True)
     except FileNotFoundError:

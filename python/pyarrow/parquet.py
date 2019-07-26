@@ -127,9 +127,11 @@ class ParquetFile(object):
         improve performance in some environments
     """
     def __init__(self, source, metadata=None, common_metadata=None,
-                 memory_map=True):
+                 as_dictionary=None, memory_map=True):
         self.reader = ParquetReader()
-        self.reader.open(source, use_memory_map=memory_map, metadata=metadata)
+        self.reader.open(source, use_memory_map=memory_map,
+                         columns_as_dictionary=as_dictionary,
+                         metadata=metadata)
         self.common_metadata = common_metadata
         self._nested_paths_by_prefix = self._build_nested_paths()
 
@@ -906,10 +908,12 @@ EXCLUDED_PARQUET_PATHS = {'_SUCCESS'}
 def _open_dataset_file(dataset, path, meta=None):
     if dataset.fs is None or isinstance(dataset.fs, LocalFileSystem):
         return ParquetFile(path, metadata=meta, memory_map=dataset.memory_map,
+                           as_dictionary=dataset.as_dictionary,
                            common_metadata=dataset.common_metadata)
     else:
         return ParquetFile(dataset.fs.open(path, mode='rb'), metadata=meta,
                            memory_map=dataset.memory_map,
+                           as_dictionary=dataset.as_dictionary,
                            common_metadata=dataset.common_metadata)
 
 
@@ -930,6 +934,8 @@ class ParquetDataset(object):
     schema : pyarrow.parquet.Schema
         Use schema obtained elsewhere to validate file schemas. Alternative to
         metadata parameter
+    as_dictionary : list, default None
+        Fields to dictionary encode
     split_row_groups : boolean, default False
         Divide files into pieces for each row group in the file
     validate_schema : boolean, default True
@@ -958,7 +964,8 @@ class ParquetDataset(object):
         dataset if possible, which can improve performance in some environments
     """
     def __init__(self, path_or_paths, filesystem=None, schema=None,
-                 metadata=None, split_row_groups=False, validate_schema=True,
+                 metadata=None, as_dictionary=None,
+                 split_row_groups=False, validate_schema=True,
                  filters=None, metadata_nthreads=1, memory_map=True):
         a_path = path_or_paths
         if isinstance(a_path, list):
@@ -970,6 +977,7 @@ class ParquetDataset(object):
         else:
             self.paths = _parse_uri(path_or_paths)
 
+        self.as_dictionary = as_dictionary
         self.memory_map = memory_map
 
         (self.pieces,
@@ -1183,6 +1191,9 @@ columns: list
     If not None, only these columns will be read from the file. A column
     name may be a prefix of a nested field, e.g. 'a' will select 'a.b',
     'a.c', and 'a.d.e'
+as_dictionary : list, default None
+    Columns to dictionary encode. Only works for columns stored as BYTE_ARRAY
+    such as strings
 use_threads : boolean, default True
     Perform multi-threaded column reads
 metadata : FileMetaData
@@ -1204,13 +1215,15 @@ Returns
 
 
 def read_table(source, columns=None, use_threads=True, metadata=None,
-               use_pandas_metadata=False, memory_map=True,
+               as_dictionary=None, use_pandas_metadata=False, memory_map=True,
                filesystem=None, filters=None):
     if _is_path_like(source):
         pf = ParquetDataset(source, metadata=metadata, memory_map=memory_map,
+                            as_dictionary=as_dictionary,
                             filesystem=filesystem, filters=filters)
     else:
-        pf = ParquetFile(source, metadata=metadata, memory_map=memory_map)
+        pf = ParquetFile(source, metadata=metadata,
+                         as_dictionary=as_dictionary, memory_map=memory_map)
     return pf.read(columns=columns, use_threads=use_threads,
                    use_pandas_metadata=use_pandas_metadata)
 

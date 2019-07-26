@@ -727,10 +727,18 @@ Status OpenFile(const std::shared_ptr<::arrow::io::RandomAccessFile>& file,
                 MemoryPool* pool, const ReaderProperties& props,
                 const std::shared_ptr<FileMetaData>& metadata,
                 std::unique_ptr<FileReader>* reader) {
+  return OpenFile(file, pool, props, default_arrow_reader_properties(),
+                  metadata, reader);
+}
+
+Status OpenFile(const std::shared_ptr<::arrow::io::RandomAccessFile>& file,
+                MemoryPool* pool, const ReaderProperties& props,
+                const ArrowReaderProperties& arrow_props,
+                const std::shared_ptr<FileMetaData>& metadata,
+                std::unique_ptr<FileReader>* reader) {
   std::unique_ptr<ParquetReader> pq_reader;
   PARQUET_CATCH_NOT_OK(pq_reader = ParquetReader::Open(file, props, metadata));
-  return FileReader::Make(pool, std::move(pq_reader), default_arrow_reader_properties(),
-                          reader);
+  return FileReader::Make(pool, std::move(pq_reader), arrow_props, reader);
 }
 
 Status OpenFile(const std::shared_ptr<::arrow::io::RandomAccessFile>& file,

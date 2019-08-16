@@ -207,6 +207,7 @@ class PlainBooleanEncoder : public EncoderImpl,
 
   void Put(const bool* src, int num_values) override;
   void Put(const std::vector<bool>& src, int num_values) override;
+  void Put(const arrow::Array& values) override;
 
   void PutSpaced(const bool* src, int num_values, const uint8_t* valid_bits,
                  int64_t valid_bits_offset) override {
@@ -224,10 +225,6 @@ class PlainBooleanEncoder : public EncoderImpl,
       valid_bits_reader.Next();
     }
     Put(data, num_valid_values);
-  }
-
-  void Put(const arrow::Array& values) override {
-    ParquetException::NYI("Direct Arrow to Boolean writes not implemented");
   }
 
  private:
@@ -315,6 +312,10 @@ void PlainBooleanEncoder::Put(const bool* src, int num_values) {
 }
 
 void PlainBooleanEncoder::Put(const std::vector<bool>& src, int num_values) {
+  PutImpl(src, num_values);
+}
+
+void PlainBooleanEncoder::Put(const arrow::Array& values) {
   PutImpl(src, num_values);
 }
 

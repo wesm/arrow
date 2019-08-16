@@ -776,6 +776,12 @@ class TypedColumnWriterImpl : public ColumnWriterImpl, public TypedColumnWriter<
                          int64_t num_levels, const arrow::Array& array,
                          ArrowWriteContext* context);
 
+  // Write arrow::Array slices directly into encoders, statistics, without
+  // pre-serialization
+  Status WriteArrowDirect(const int16_t* def_levels, const int16_t* rep_levels,
+                          int64_t num_levels, const arrow::Array& array,
+                          ArrowWriteContext* context);
+
   void WriteDictionaryPage() override {
     // We have to dynamic cast here because of TypedEncoder<Type> as
     // some compilers don't want to cast through virtual inheritance
@@ -987,6 +993,34 @@ class TypedColumnWriterImpl : public ColumnWriterImpl, public TypedColumnWriter<
 };
 
 template <typename DType>
+Status TypedColumnWriterImpl<DType>::WriteArrowDirect(const int16_t* def_levels,
+                                                      const int16_t* rep_levels,
+                                                      int64_t num_levels,
+                                                      const arrow::Array& array,
+                                                      ArrowWriteContext* ctx) {
+  int64_t value_offset = 0;
+  auto WriteChunk = [&](int64_t offset, int64_t batch_size) {
+    int64_t batch_num_values = 0;
+    int64_t batch_num_spaced_values = 0;
+    WriteLevelsSpaced(batch_size, def_levels + offset, rep_levels + offset,
+                      &batch_num_values, &batch_num_spaced_values);
+    std::shared_ptr<arrow::Array> data_slice =
+        array.Slice(value_offset, batch_num_spaced_values);
+    current_encoder_->Put(*data_slice);
+    if (page_statistics_ != nullptr) {
+      page_statistics_->Update(*data_slice);
+    }
+    CommitWriteAndCheckPageLimit(batch_size, batch_num_values);
+    CheckDictionarySizeLimit();
+    value_offset += batch_num_spaced_values;
+  };
+
+  PARQUET_CATCH_NOT_OK(
+      DoInBatches(num_levels, properties_->write_batch_size(), WriteChunk));
+  return Status::OK();
+}
+
+template <typename DType>
 Status TypedColumnWriterImpl<DType>::WriteArrowDictionary(const int16_t* def_levels,
                                                           const int16_t* rep_levels,
                                                           int64_t num_levels,
@@ -1161,16 +1195,6 @@ Status WriteArrowZeroCopy(const arrow::Array& array, int64_t num_levels,
 // Write Arrow to BooleanType
 
 template <>
-struct SerializeFunctor<BooleanType, arrow::BooleanType> {
-  Status Serialize(const arrow::BooleanArray& data, ArrowWriteContext*, bool* out) {
-    for (int i = 0; i < data.length(); i++) {
-      *out++ = data.Value(i);
-    }
-    return Status::OK();
-  }
-};
-
-template <>
 Status TypedColumnWriterImpl<BooleanType>::WriteArrowDense(const int16_t* def_levels,
                                                            const int16_t* rep_levels,
                                                            int64_t num_levels,
@@ -1179,8 +1203,7 @@ Status TypedColumnWriterImpl<BooleanType>::WriteArrowDense(const int16_t* def_le
   if (array.type_id() != arrow::Type::BOOL) {
     ARROW_UNSUPPORTED();
   }
-  return WriteArrowSerialize<BooleanType, arrow::BooleanType>(
-      array, num_levels, def_levels, rep_levels, ctx, this);
+  return WriteArrowDirect(def_levels, rep_levels, num_levels, array, ctx);
 }
 
 // ----------------------------------------------------------------------
@@ -1457,27 +1480,7 @@ Status TypedColumnWriterImpl<ByteArrayType>::WriteArrowDense(const int16_t* def_
       array.type()->id() != arrow::Type::STRING) {
     ARROW_UNSUPPORTED();
   }
-
-  int64_t value_offset = 0;
-  auto WriteChunk = [&](int64_t offset, int64_t batch_size) {
-    int64_t batch_num_values = 0;
-    int64_t batch_num_spaced_values = 0;
-    WriteLevelsSpaced(batch_size, def_levels + offset, rep_levels + offset,
-                      &batch_num_values, &batch_num_spaced_values);
-    std::shared_ptr<arrow::Array> data_slice =
-        array.Slice(value_offset, batch_num_spaced_values);
-    current_encoder_->Put(*data_slice);
-    if (page_statistics_ != nullptr) {
-      page_statistics_->Update(*data_slice);
-    }
-    CommitWriteAndCheckPageLimit(batch_size, batch_num_values);
-    CheckDictionarySizeLimit();
-    value_offset += batch_num_spaced_values;
-  };
-
-  PARQUET_CATCH_NOT_OK(
-      DoInBatches(num_levels, properties_->write_batch_size(), WriteChunk));
-  return Status::OK();
+  return WriteArrowDirect(def_levels, rep_levels, num_levels, array, ctx);
 }
 
 // ----------------------------------------------------------------------

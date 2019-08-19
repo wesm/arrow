@@ -334,4 +334,12 @@ void AssertSortedEquals(std::vector<T> u, std::vector<T> v) {
   ASSERT_EQ(u, v);
 }
 
+template <typename T>
+void AssertVectorsEqual(const std::vector<T>& left, const std::vector<T>& right) {
+  ASSERT_EQ(left.size(), right.size());
+  for (size_t i = 0; i < left.size(); ++i) {
+    ASSERT_EQ(left[i], right[i]) << i;
+  }
+}
+
 }  // namespace arrow

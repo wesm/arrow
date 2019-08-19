@@ -102,12 +102,12 @@ class TestPrimitiveReader : public ::testing::Test {
 
     ASSERT_EQ(num_levels_, batch_actual);
     ASSERT_EQ(num_values_, total_values_read);
-    ASSERT_TRUE(vector_equal(values_, vresult));
+    AssertVectorsEqual(values_, vresult);
     if (max_def_level_ > 0) {
-      ASSERT_TRUE(vector_equal(def_levels_, dresult));
+      AssertVectorsEqual(def_levels_, dresult);
     }
     if (max_rep_level_ > 0) {
-      ASSERT_TRUE(vector_equal(rep_levels_, rresult));
+      AssertVectorsEqual(rep_levels_, rresult);
     }
     // catch improper writes at EOS
     batch_actual =
@@ -148,14 +148,14 @@ class TestPrimitiveReader : public ::testing::Test {
     ASSERT_EQ(num_levels_, levels_actual);
     ASSERT_EQ(num_values_, total_values_read);
     if (max_def_level_ > 0) {
-      ASSERT_TRUE(vector_equal(def_levels_, dresult));
+      AssertVectorsEqual(def_levels_, dresult);
       ASSERT_TRUE(vector_equal_with_def_levels(values_, dresult, max_def_level_,
                                                max_rep_level_, vresult));
     } else {
-      ASSERT_TRUE(vector_equal(values_, vresult));
+      AssertVectorsEqual(values_, vresult);
     }
     if (max_rep_level_ > 0) {
-      ASSERT_TRUE(vector_equal(rep_levels_, rresult));
+      AssertVectorsEqual(rep_levels_, rresult);
     }
     // catch improper writes at EOS
     batch_actual = static_cast<int>(
@@ -282,7 +282,7 @@ TEST_F(TestPrimitiveReader, TestInt32FlatRequiredSkip) {
   std::vector<int32_t> sub_values(
       values_.begin() + 2 * levels_per_page,
       values_.begin() + static_cast<int>(2.5 * static_cast<double>(levels_per_page)));
-  ASSERT_TRUE(vector_equal(sub_values, vresult));
+  AssertVectorsEqual(sub_values, vresult);
 
   // 2) skip_size == page_size (skip across two pages)
   levels_skipped = reader->Skip(levels_per_page);
@@ -295,7 +295,7 @@ TEST_F(TestPrimitiveReader, TestInt32FlatRequiredSkip) {
       sub_values.end(),
       values_.begin() + static_cast<int>(3.5 * static_cast<double>(levels_per_page)),
       values_.begin() + 4 * levels_per_page);
-  ASSERT_TRUE(vector_equal(sub_values, vresult));
+  AssertVectorsEqual(sub_values, vresult);
 
   // 3) skip_size < page_size (skip limited to a single page)
   // Skip half a page
@@ -309,7 +309,7 @@ TEST_F(TestPrimitiveReader, TestInt32FlatRequiredSkip) {
       sub_values.end(),
       values_.begin() + static_cast<int>(4.5 * static_cast<double>(levels_per_page)),
       values_.end());
-  ASSERT_TRUE(vector_equal(sub_values, vresult));
+  AssertVectorsEqual(sub_values, vresult);
 
   values_.clear();
   def_levels_.clear();

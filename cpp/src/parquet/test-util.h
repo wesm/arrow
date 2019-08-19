@@ -64,33 +64,6 @@ std::string get_bad_data_dir();
 std::string get_data_file(const std::string& filename, bool is_good = true);
 
 template <typename T>
-static inline void assert_vector_equal(const std::vector<T>& left,
-                                       const std::vector<T>& right) {
-  ASSERT_EQ(left.size(), right.size());
-
-  for (size_t i = 0; i < left.size(); ++i) {
-    ASSERT_EQ(left[i], right[i]) << i;
-  }
-}
-
-template <typename T>
-static inline bool vector_equal(const std::vector<T>& left, const std::vector<T>& right) {
-  if (left.size() != right.size()) {
-    return false;
-  }
-
-  for (size_t i = 0; i < left.size(); ++i) {
-    if (left[i] != right[i]) {
-      std::cerr << "index " << i << " left was " << left[i] << " right was " << right[i]
-                << std::endl;
-      return false;
-    }
-  }
-
-  return true;
-}
-
-template <typename T>
 static std::vector<T> slice(const std::vector<T>& values, int start, int end) {
   if (end < start) {
     return std::vector<T>(0);
@@ -102,9 +75,6 @@ static std::vector<T> slice(const std::vector<T>& values, int start, int end) {
   }
   return out;
 }
-
-void random_bytes(int n, uint32_t seed, std::vector<uint8_t>* out);
-void random_bools(int n, double p, uint32_t seed, bool* out);
 
 template <typename T>
 inline void random_numbers(int n, uint32_t seed, T min_value, T max_value, T* out) {

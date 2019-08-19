@@ -71,24 +71,6 @@ std::string get_data_file(const std::string& filename, bool is_good) {
   return ss.str();
 }
 
-void random_bytes(int n, uint32_t seed, std::vector<uint8_t>* out) {
-  std::default_random_engine gen(seed);
-  std::uniform_int_distribution<int> d(0, 255);
-
-  out->resize(n);
-  for (int i = 0; i < n; ++i) {
-    (*out)[i] = static_cast<uint8_t>(d(gen));
-  }
-}
-
-void random_bools(int n, double p, uint32_t seed, bool* out) {
-  std::default_random_engine gen(seed);
-  std::bernoulli_distribution d(p);
-  for (int i = 0; i < n; ++i) {
-    out[i] = d(gen);
-  }
-}
-
 void random_Int96_numbers(int n, uint32_t seed, int32_t min_value, int32_t max_value,
                           Int96* out) {
   std::default_random_engine gen(seed);

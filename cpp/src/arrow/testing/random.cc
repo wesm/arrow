@@ -237,4 +237,23 @@ std::shared_ptr<arrow::Array> RandomArrayGenerator::StringWithRepeats(
   return result;
 }
 }  // namespace random
+
+void GetRandomBytes(int n, uint32_t seed, std::vector<uint8_t>* out) {
+  std::default_random_engine gen(seed);
+  std::uniform_int_distribution<int> d(0, 255);
+
+  out->resize(n);
+  for (int i = 0; i < n; ++i) {
+    (*out)[i] = static_cast<uint8_t>(d(gen));
+  }
+}
+
+void GetRandomBools(int n, double p, uint32_t seed, bool* out) {
+  std::default_random_engine gen(seed);
+  std::bernoulli_distribution d(p);
+  for (int i = 0; i < n; ++i) {
+    out[i] = d(gen);
+  }
+}
+
 }  // namespace arrow

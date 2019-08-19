@@ -288,4 +288,10 @@ void rand_uniform_int(int64_t n, uint32_t seed, T min_value, T max_value, U* out
   std::generate(out, out + n, [&d, &gen] { return static_cast<U>(d(gen)); });
 }
 
+ARROW_EXPORT
+void GetRandomBytes(int n, uint32_t seed, std::vector<uint8_t>* out);
+
+ARROW_EXPORT
+void GetRandomBools(int n, double p, uint32_t seed, bool* out);
+
 }  // namespace arrow

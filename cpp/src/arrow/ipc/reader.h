@@ -148,6 +148,9 @@ class ARROW_EXPORT RecordBatchFileReader {
   /// \brief Returns the number of record batches in the file
   int num_record_batches() const;
 
+  /// \brief Returns the total number of records/rows of data in the file
+  int total_length() const;
+
   /// \brief Return the metadata version from the file metadata
   MetadataVersion version() const;
 

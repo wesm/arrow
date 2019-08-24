@@ -796,6 +796,10 @@ int RecordBatchFileReader::num_record_batches() const {
   return impl_->num_record_batches();
 }
 
+int RecordBatchFileReader::total_length() const {
+  return impl_->total_length();
+}
+
 MetadataVersion RecordBatchFileReader::version() const { return impl_->version(); }
 
 Status RecordBatchFileReader::ReadRecordBatch(int i,

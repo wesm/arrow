@@ -18,11 +18,20 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 
 #include "arrow/dataset/visibility.h"
+#include "arrow/scalar.h"
 
 namespace arrow {
 namespace dataset {
+
+/// placeholder until ARROW-6243 is resolved
+/// represents a conjunction of several equality constraints
+class ARROW_DS_EXPORT Expression {
+ public:
+  std::unordered_map<std::string, std::shared_ptr<Scalar>> values;
+};
 
 class ARROW_DS_EXPORT Filter {
  public:
@@ -34,6 +43,11 @@ class ARROW_DS_EXPORT Filter {
     ///
     GENERIC
   };
+
+  const std::shared_ptr<Expression>& expression() const { return expression_; }
+
+ private:
+  std::shared_ptr<Expression> expression_;
 };
 
 }  // namespace dataset

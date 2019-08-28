@@ -184,5 +184,9 @@ TEST_F(TestParquetFileSystemBasedDataSource, Recursive) { this->Recursive(); }
 
 TEST_F(TestParquetFileSystemBasedDataSource, DeletedFile) { this->DeletedFile(); }
 
+TEST_F(TestParquetFileSystemBasedDataSource, PredicatePushDown) {
+  this->PredicatePushDown();
+}
+
 }  // namespace dataset
 }  // namespace arrow

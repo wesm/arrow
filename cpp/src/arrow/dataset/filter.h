@@ -21,8 +21,11 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <string>
+#include <utility>
 
 #include "arrow/compute/kernel.h"
+#include "arrow/dataset/dataset.h"
 #include "arrow/dataset/visibility.h"
 #include "arrow/result.h"
 #include "arrow/scalar.h"
@@ -31,7 +34,8 @@ namespace arrow {
 namespace dataset {
 
 /// placeholder until ARROW-6243 is resolved
-/// represents a conjunction of several equality constraints
+/// Represents a conjunction of several equality constraints if trivial == NULLPTR.
+/// If trivial != NULLPTR, represents a comparison which always evaluates to *trivial.
 class ARROW_DS_EXPORT Expression {
  public:
   Result<std::shared_ptr<Expression>> Assume(const Expression& given) const {
@@ -76,11 +80,12 @@ class ARROW_DS_EXPORT Expression {
   }
 
   bool IsTrivialCondition(BooleanScalar* c = NULLPTR) const {
-    if (trivial == NULLPTR) {
+    if (values.size() != 0) {
       return false;
     }
+
     if (c != NULLPTR) {
-      *c = *trivial;
+      *c = trivial == NULLPTR ? BooleanScalar(true) : *trivial;
     }
     return true;
   }
@@ -102,11 +107,40 @@ class ARROW_DS_EXPORT Filter {
     GENERIC
   };
 
+  explicit Filter(std::shared_ptr<Expression> e) : expression_(std::move(e)) {}
+
   const std::shared_ptr<Expression>& expression() const { return expression_; }
 
  private:
   std::shared_ptr<Expression> expression_;
 };
+
+inline Result<std::shared_ptr<Expression>> SelectorAssume(
+    const std::shared_ptr<DataSelector>& selector,
+    const std::shared_ptr<Expression>& given) {
+  if (selector == nullptr) {
+    return std::make_shared<Expression>();
+  }
+
+  Expression out_expr;
+  for (const auto& f : selector->filters) {
+    for (const auto& name_value : f->expression()->values) {
+      if (!out_expr.values.insert(name_value).second) {
+        return Status::Invalid("filter expressions were not disjoint");
+      }
+    }
+  }
+
+  if (given == nullptr) {
+    return out_expr.Copy();
+  }
+  return out_expr.Assume(*given);
+}
+
+inline std::shared_ptr<DataSelector> ExpressionSelector(std::shared_ptr<Expression> e) {
+  return std::make_shared<DataSelector>(
+      DataSelector{FilterVector{std::make_shared<Filter>(std::move(e))}});
+}
 
 }  // namespace dataset
 }  // namespace arrow

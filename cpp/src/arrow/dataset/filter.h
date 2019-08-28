@@ -17,10 +17,14 @@
 
 #pragma once
 
+#include <algorithm>
+#include <iterator>
+#include <map>
 #include <memory>
-#include <unordered_map>
 
+#include "arrow/compute/kernel.h"
 #include "arrow/dataset/visibility.h"
+#include "arrow/result.h"
 #include "arrow/scalar.h"
 
 namespace arrow {
@@ -30,7 +34,61 @@ namespace dataset {
 /// represents a conjunction of several equality constraints
 class ARROW_DS_EXPORT Expression {
  public:
-  std::unordered_map<std::string, std::shared_ptr<Scalar>> values;
+  Result<std::shared_ptr<Expression>> Assume(const Expression& given) const {
+    if (trivial != NULLPTR) {
+      // no further simplification is possible
+      return Copy();
+    }
+
+    if (given.trivial != NULLPTR) {
+      return Status::NotImplemented("simplification given trivial expression");
+    }
+
+    auto out = std::make_shared<Expression>();
+
+    using Constraint = std::pair<const std::string, std::shared_ptr<Scalar>>;
+    std::set_difference(values.begin(), values.end(), given.values.begin(),
+                        given.values.end(), std::inserter(out->values, out->values.end()),
+                        [&out](const Constraint& c, const Constraint& given) {
+                          if (c.first != given.first) {
+                            return c.first < given.first;
+                          }
+                          if (!c.second->Equals(*given.second)) {
+                            // the given expression indicates this field will always equal
+                            // something else, so this expression will always evaluate to
+                            // false
+                            out->trivial = std::make_shared<BooleanScalar>(false);
+                          }
+                          // drop constraints from this expression which are guaranteed by
+                          // given
+                          return false;
+                        });
+
+    if (out->trivial != NULLPTR) {
+      out->values.clear();
+    }
+    return std::move(out);
+  }
+
+  Result<compute::Datum> Evaluate(compute::FunctionContext* ctx,
+                                  const RecordBatch& batch) const {
+    return Status::NotImplemented("evaluation of expressions against record batches");
+  }
+
+  bool IsTrivialCondition(BooleanScalar* c = NULLPTR) const {
+    if (trivial == NULLPTR) {
+      return false;
+    }
+    if (c != NULLPTR) {
+      *c = *trivial;
+    }
+    return true;
+  }
+
+  std::shared_ptr<Expression> Copy() const { return std::make_shared<Expression>(*this); }
+
+  std::map<std::string, std::shared_ptr<Scalar>> values;
+  std::shared_ptr<BooleanScalar> trivial;
 };
 
 class ARROW_DS_EXPORT Filter {

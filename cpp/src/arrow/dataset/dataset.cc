@@ -69,7 +69,7 @@ std::unique_ptr<EmptyIterator<std::shared_ptr<DataFragment>>> DataSource::Assume
     return nullptr;
   }
 
-  auto c = SelectorAssume((*options)->selector, condition_);
+  auto c = SelectorAssume((*options)->selector, partition_expression_);
   DCHECK_OK(c.status());
   auto expr = std::move(c).ValueOrDie();
 

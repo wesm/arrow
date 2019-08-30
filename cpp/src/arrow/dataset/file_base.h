@@ -180,7 +180,7 @@ class ARROW_DS_EXPORT FileSystemBasedDataSource : public DataSource {
 
   std::string type() const override { return "directory"; }
 
-  std::unique_ptr<DataFragmentIterator> GetFragments(
+  std::unique_ptr<DataFragmentIterator> GetFragmentsImpl(
       std::shared_ptr<ScanOptions> options) override;
 
  protected:

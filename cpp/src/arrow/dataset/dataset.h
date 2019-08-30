@@ -78,8 +78,8 @@ class ARROW_DS_EXPORT DataSource {
  public:
   /// \brief GetFragments returns an iterator of DataFragments. The ScanOptions
   /// controls filtering and schema inference.
-  virtual std::unique_ptr<DataFragmentIterator> GetFragments(
-      std::shared_ptr<ScanOptions> options) = 0;
+  std::unique_ptr<DataFragmentIterator> GetFragments(
+      std::shared_ptr<ScanOptions> options);
 
   /// \brief An expression which evaluates to true for all data viewed by this DataSource.
   /// May be null, which indicates no information is available.
@@ -96,9 +96,12 @@ class ARROW_DS_EXPORT DataSource {
   explicit DataSource(std::shared_ptr<Expression> c)
       : partition_expression_(std::move(c)) {}
 
+  virtual std::unique_ptr<DataFragmentIterator> GetFragmentsImpl(
+      std::shared_ptr<ScanOptions> options) = 0;
+
   /// Mutates a ScanOptions by assuming partition_expression_ holds for all yielded
   /// fragments. Returns false if the selector is not satisfiable in this DataSource.
-  bool AssumePartitionExpression(std::shared_ptr<ScanOptions>* options) const;
+  virtual bool AssumePartitionExpression(std::shared_ptr<ScanOptions>* options) const;
 
   std::shared_ptr<Expression> partition_expression_;
 };
@@ -109,7 +112,7 @@ class ARROW_DS_EXPORT SimpleDataSource : public DataSource {
   explicit SimpleDataSource(DataFragmentVector fragments)
       : fragments_(std::move(fragments)) {}
 
-  std::unique_ptr<DataFragmentIterator> GetFragments(
+  std::unique_ptr<DataFragmentIterator> GetFragmentsImpl(
       std::shared_ptr<ScanOptions> options) override;
 
   std::string type() const override { return "simple_data_source"; }

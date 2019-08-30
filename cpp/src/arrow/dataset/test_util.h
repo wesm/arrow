@@ -196,8 +196,8 @@ class FileSystemBasedDataSourceMixin : public FileSourceFixtureMixin {
   }
 
   void MakeDataSource() {
-    ASSERT_OK(FileSystemBasedDataSource::Make(fs_.get(), selector_, format_, &source_));
-    source_->partition_expression(partition_expression_);
+    ASSERT_OK(FileSystemBasedDataSource::Make(fs_.get(), selector_, format_,
+                                              partition_expression_, &source_));
   }
 
  protected:

@@ -182,7 +182,7 @@ class FileSystemBasedDataSourceMixin : public FileSourceFixtureMixin {
       CreateFile(path, "");
     }
 
-    condition_ = std::make_shared<Expression>();
+    partition_expression_ = std::make_shared<Expression>();
   }
 
   void CreateFile(std::string path, std::string contents) {
@@ -197,7 +197,7 @@ class FileSystemBasedDataSourceMixin : public FileSourceFixtureMixin {
 
   void MakeDataSource() {
     ASSERT_OK(FileSystemBasedDataSource::Make(fs_.get(), selector_, format_, &source_));
-    source_->condition(condition_);
+    source_->partition_expression(partition_expression_);
   }
 
  protected:
@@ -242,14 +242,15 @@ class FileSystemBasedDataSourceMixin : public FileSourceFixtureMixin {
   }
 
   void PredicatePushDown() {
-    condition_->values["alpha"] = std::make_shared<Int16Scalar>(3);
+    partition_expression_->values["alpha"] = std::make_shared<Int16Scalar>(3);
     MakeDataSource();
 
     options_->selector = std::make_shared<DataSelector>();
     options_->selector->filters.resize(1);
 
     // with a filter identical to the partition condition, all fragments are yielded
-    options_->selector->filters[0] = std::make_shared<Filter>(condition_->Copy());
+    options_->selector->filters[0] =
+        std::make_shared<Filter>(partition_expression_->Copy());
 
     size_t count = 0;
     // ASSERT_OK(source_->GetFragments(context_)->Visit(OpenFragments(&count)));
@@ -272,7 +273,7 @@ class FileSystemBasedDataSourceMixin : public FileSourceFixtureMixin {
   std::shared_ptr<FileFormat> format_;
   std::shared_ptr<Schema> schema_;
   std::shared_ptr<ScanOptions> options_;
-  std::shared_ptr<Expression> condition_;
+  std::shared_ptr<Expression> partition_expression_;
 };
 
 template <typename Gen>

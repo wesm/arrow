@@ -46,11 +46,12 @@ Status FileBasedDataFragment::Scan(std::shared_ptr<ScanContext> scan_context,
   return format_->ScanFile(source_, scan_options_, scan_context, out);
 }
 
-FileSystemBasedDataSource::FileSystemBasedDataSource(fs::FileSystem* filesystem,
-                                                     const fs::Selector& selector,
-                                                     std::shared_ptr<FileFormat> format,
-                                                     std::vector<fs::FileStats> stats)
-    : filesystem_(filesystem),
+FileSystemBasedDataSource::FileSystemBasedDataSource(
+    fs::FileSystem* filesystem, const fs::Selector& selector,
+    std::shared_ptr<FileFormat> format, std::shared_ptr<Expression> partition_expression,
+    std::vector<fs::FileStats> stats)
+    : DataSource(std::move(partition_expression)),
+      filesystem_(filesystem),
       selector_(std::move(selector)),
       format_(std::move(format)),
       stats_(std::move(stats)) {}
@@ -58,6 +59,7 @@ FileSystemBasedDataSource::FileSystemBasedDataSource(fs::FileSystem* filesystem,
 Status FileSystemBasedDataSource::Make(fs::FileSystem* filesystem,
                                        const fs::Selector& selector,
                                        std::shared_ptr<FileFormat> format,
+                                       std::shared_ptr<Expression> partition_expression,
                                        std::unique_ptr<FileSystemBasedDataSource>* out) {
   std::vector<fs::FileStats> stats;
   RETURN_NOT_OK(filesystem->GetTargetStats(selector, &stats));
@@ -70,14 +72,22 @@ Status FileSystemBasedDataSource::Make(fs::FileSystem* filesystem,
   stats.resize(new_end - stats.begin());
 
   out->reset(new FileSystemBasedDataSource(filesystem, selector, std::move(format),
+                                           std::move(partition_expression),
                                            std::move(stats)));
   return Status::OK();
 }
 
+Status FileSystemBasedDataSource::Make(fs::FileSystem* filesystem,
+                                       const fs::Selector& selector,
+                                       std::shared_ptr<FileFormat> format,
+                                       std::unique_ptr<FileSystemBasedDataSource>* out) {
+  return Make(filesystem, selector, std::move(format), nullptr, out);
+}
+
 std::unique_ptr<DataFragmentIterator> FileSystemBasedDataSource::GetFragments(
     std::shared_ptr<ScanOptions> options) {
-  if (auto empty = AssumeCondition(&options)) {
-    return empty;
+  if (AssumePartitionExpression(&options)) {
+    return std::unique_ptr<EmptyIterator<std::shared_ptr<DataFragment>>>();
   }
 
   struct Impl : DataFragmentIterator {

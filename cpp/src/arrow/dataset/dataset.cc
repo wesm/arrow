@@ -65,7 +65,7 @@ Status Dataset::NewScan(std::unique_ptr<ScannerBuilder>* out) {
 bool DataSource::AssumePartitionExpression(std::shared_ptr<ScanOptions>* options) const {
   DCHECK_NE(options, nullptr);
   if (*options == nullptr) {
-    // null scan context; no selector to simplify
+    // null scan options; no selector to simplify
     return true;
   }
 
@@ -85,11 +85,16 @@ bool DataSource::AssumePartitionExpression(std::shared_ptr<ScanOptions>* options
   return true;
 }
 
-std::unique_ptr<DataFragmentIterator> SimpleDataSource::GetFragments(
+std::unique_ptr<DataFragmentIterator> DataSource::GetFragments(
     std::shared_ptr<ScanOptions> options) {
-  if (AssumePartitionExpression(&options)) {
-    return std::unique_ptr<EmptyIterator<std::shared_ptr<DataFragment>>>();
+  if (!AssumePartitionExpression(&options)) {
+    return internal::make_unique<EmptyIterator<std::shared_ptr<DataFragment>>>();
   }
+  return GetFragmentsImpl(std::move(options));
+}
+
+std::unique_ptr<DataFragmentIterator> SimpleDataSource::GetFragmentsImpl(
+    std::shared_ptr<ScanOptions> options) {
   return MakeVectorIterator(fragments_);
 }
 

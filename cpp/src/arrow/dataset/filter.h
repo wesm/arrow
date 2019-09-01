@@ -118,7 +118,7 @@ class ARROW_DS_EXPORT Filter {
 inline Result<std::shared_ptr<Expression>> SelectorAssume(
     const std::shared_ptr<DataSelector>& selector,
     const std::shared_ptr<Expression>& given) {
-  if (selector == nullptr) {
+  if (selector == NULLPTR) {
     return std::make_shared<Expression>();
   }
 
@@ -131,7 +131,7 @@ inline Result<std::shared_ptr<Expression>> SelectorAssume(
     }
   }
 
-  if (given == nullptr) {
+  if (given == NULLPTR) {
     return out_expr.Copy();
   }
   return out_expr.Assume(*given);

@@ -39,37 +39,47 @@ namespace dataset {
 class ARROW_DS_EXPORT Expression {
  public:
   Result<std::shared_ptr<Expression>> Assume(const Expression& given) const {
-    if (trivial != NULLPTR) {
+    if (IsTrivialCondition()) {
       // no further simplification is possible
       return Copy();
     }
 
-    if (given.trivial != NULLPTR) {
+    if (given.IsTrivialCondition()) {
       return Status::NotImplemented("simplification given trivial expression");
     }
 
     auto out = std::make_shared<Expression>();
 
+    bool is_trivially_false = false;
+
+    // assemble constraints present in this expression but not in given
     using Constraint = std::pair<const std::string, std::shared_ptr<Scalar>>;
     std::set_difference(values.begin(), values.end(), given.values.begin(),
                         given.values.end(), std::inserter(out->values, out->values.end()),
-                        [&out](const Constraint& c, const Constraint& given) {
+                        [&](const Constraint& c, const Constraint& given) {
+                          if (!c.second->is_valid || !given.second->is_valid) {
+                            return false;
+                          }
+
                           if (c.first != given.first) {
                             return c.first < given.first;
                           }
+
                           if (!c.second->Equals(*given.second)) {
                             // the given expression indicates this field will always equal
                             // something else, so this expression will always evaluate to
                             // false
-                            out->trivial = std::make_shared<BooleanScalar>(false);
+                            is_trivially_false = true;
                           }
+
                           // drop constraints from this expression which are guaranteed by
                           // given
                           return false;
                         });
 
-    if (out->trivial != NULLPTR) {
+    if (is_trivially_false) {
       out->values.clear();
+      out->trivial_condition = false;
     }
     return std::move(out);
   }
@@ -79,13 +89,15 @@ class ARROW_DS_EXPORT Expression {
     return Status::NotImplemented("evaluation of expressions against record batches");
   }
 
-  bool IsTrivialCondition(BooleanScalar* c = NULLPTR) const {
+  bool IsNull() const { return false; }
+
+  bool IsTrivialCondition(bool* c = NULLPTR) const {
     if (values.size() != 0) {
       return false;
     }
 
     if (c != NULLPTR) {
-      *c = trivial == NULLPTR ? BooleanScalar(true) : *trivial;
+      *c = trivial_condition;
     }
     return true;
   }
@@ -93,7 +105,7 @@ class ARROW_DS_EXPORT Expression {
   std::shared_ptr<Expression> Copy() const { return std::make_shared<Expression>(*this); }
 
   std::map<std::string, std::shared_ptr<Scalar>> values;
-  std::shared_ptr<BooleanScalar> trivial;
+  bool trivial_condition = true;
 };
 
 class ARROW_DS_EXPORT Filter {

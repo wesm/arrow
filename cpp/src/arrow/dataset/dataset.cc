@@ -62,35 +62,38 @@ Status Dataset::NewScan(std::unique_ptr<ScannerBuilder>* out) {
   return Status::OK();
 }
 
-bool DataSource::AssumePartitionExpression(std::shared_ptr<ScanOptions>* options) const {
-  DCHECK_NE(options, nullptr);
-  if (*options == nullptr) {
+bool DataSource::AssumePartitionExpression(
+    const std::shared_ptr<ScanOptions>& scan_options,
+    std::shared_ptr<ScanOptions>* simplified_scan_options) const {
+  DCHECK_NE(simplified_scan_options, nullptr);
+  if (scan_options == nullptr) {
     // null scan options; no selector to simplify
+    *simplified_scan_options = scan_options;
     return true;
   }
 
-  auto c = SelectorAssume((*options)->selector, partition_expression_);
+  auto c = SelectorAssume(scan_options->selector, partition_expression_);
   DCHECK_OK(c.status());
   auto expr = std::move(c).ValueOrDie();
 
-  BooleanScalar trivial(true);
-  if (expr->IsTrivialCondition(&trivial)) {
-    if (trivial.is_valid && !trivial.value) {
-      return false;
-    }
+  bool trivial;
+  if (expr->IsNull() || (expr->IsTrivialCondition(&trivial) && !trivial)) {
+    return false;
   }
 
-  *options = std::make_shared<ScanOptions>(**options);
-  (*options)->selector = ExpressionSelector(std::move(expr));
+  auto copy = std::make_shared<ScanOptions>(*scan_options);
+  copy->selector = ExpressionSelector(std::move(expr));
+  *simplified_scan_options = std::move(copy);
   return true;
 }
 
 std::unique_ptr<DataFragmentIterator> DataSource::GetFragments(
-    std::shared_ptr<ScanOptions> options) {
-  if (!AssumePartitionExpression(&options)) {
+    std::shared_ptr<ScanOptions> scan_options) {
+  std::shared_ptr<ScanOptions> simplified_scan_options;
+  if (!AssumePartitionExpression(scan_options, &simplified_scan_options)) {
     return internal::make_unique<EmptyIterator<std::shared_ptr<DataFragment>>>();
   }
-  return GetFragmentsImpl(std::move(options));
+  return GetFragmentsImpl(std::move(simplified_scan_options));
 }
 
 std::unique_ptr<DataFragmentIterator> SimpleDataSource::GetFragmentsImpl(

@@ -1374,21 +1374,11 @@ if(ARROW_JEMALLOC)
       "${CMAKE_CURRENT_BINARY_DIR}/jemalloc_ep-prefix/src/jemalloc_ep/dist/")
   set(JEMALLOC_STATIC_LIB
       "${JEMALLOC_PREFIX}/lib/libjemalloc_pic${CMAKE_STATIC_LIBRARY_SUFFIX}")
-  externalproject_add(
-    jemalloc_ep
+  ExternalProject_Add(jemalloc_ep
     URL ${JEMALLOC_SOURCE_URL}
     PATCH_COMMAND touch doc/jemalloc.3 doc/jemalloc.html
-    CONFIGURE_COMMAND ./configure
-                      "AR=${CMAKE_AR}"
-                      "CC=${CMAKE_C_COMPILER}"
-                      "--prefix=${JEMALLOC_PREFIX}"
-                      "--with-jemalloc-prefix=je_arrow_"
-                      "--with-private-namespace=je_arrow_private_"
-                      "--without-export"
-                      # Don't override operator new()
-                      "--disable-cxx" "--disable-libdl"
-                      # See https://github.com/jemalloc/jemalloc/issues/1237
-                      "--disable-initial-exec-tls" ${EP_LOG_OPTIONS}
+    CONFIGURE_COMMAND ./autogen.sh "AR=${CMAKE_AR}" "CC=${CMAKE_C_COMPILER}" "--prefix=${JEMALLOC_PREFIX}" "--with-jemalloc-prefix=je_arrow_" "--with-private-namespace=je_arrow_private_" "--disable-tls"
+    ${EP_LOG_OPTIONS}
     BUILD_IN_SOURCE 1
     BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS}
     BUILD_BYPRODUCTS "${JEMALLOC_STATIC_LIB}"

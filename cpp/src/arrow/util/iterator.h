@@ -25,6 +25,7 @@
 #include "arrow/status.h"
 #include "arrow/util/functional.h"
 #include "arrow/util/macros.h"
+#include "arrow/util/visibility.h"
 
 namespace arrow {
 
@@ -32,7 +33,7 @@ namespace arrow {
 template <typename T>
 class Iterator {
  public:
-  virtual ~Iterator() = default;
+  ARROW_FORCE_INLINE virtual ~Iterator() = default;
 
   /// \brief Return the next element of the sequence, nullptr when the
   /// iteration is completed

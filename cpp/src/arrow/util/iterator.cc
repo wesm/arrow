@@ -20,7 +20,7 @@
 namespace arrow {
 namespace detail {
 
-AbstractIterator::~AbstractIterator() {}
+AbstractInterface::~AbstractInterface() {}
 
 }  // namespace detail
 }  // namespace arrow

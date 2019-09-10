@@ -32,16 +32,16 @@ namespace detail {
 
 // Implementation detail of Iterator<T> interface. We export AbstractIterator's
 // virtual dtor to avoid multiple definition violations across DLLs
-class ARROW_EXPORT AbstractIterator {
+class ARROW_EXPORT AbstractInterface {
  public:
-  virtual ~AbstractIterator();
+  virtual ~AbstractInterface();
 };
 
 }  // namespace detail
 
 /// \brief A generic Iterator that can return errors
 template <typename T>
-class Iterator : public detail::AbstractIterator {
+class Iterator : public detail::AbstractInterface {
  public:
   /// \brief Return the next element of the sequence, nullptr when the
   /// iteration is completed

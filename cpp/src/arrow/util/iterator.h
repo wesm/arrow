@@ -25,15 +25,24 @@
 #include "arrow/status.h"
 #include "arrow/util/functional.h"
 #include "arrow/util/macros.h"
+#include "arrow/util/visibility.h"
 
 namespace arrow {
+namespace detail {
+
+// Implementation detail of Iterator<T> interface. We export AbstractIterator's
+// virtual dtor to avoid multiple definition violations across DLLs
+class ARROW_EXPORT AbstractIterator {
+ public:
+  virtual ~AbstractIterator();
+};
+
+}  // namespace detail
 
 /// \brief A generic Iterator that can return errors
 template <typename T>
-class Iterator {
+class Iterator : public detail::AbstractIterator {
  public:
-  virtual ~Iterator() = default;
-
   /// \brief Return the next element of the sequence, nullptr when the
   /// iteration is completed
   virtual Status Next(T* out) = 0;

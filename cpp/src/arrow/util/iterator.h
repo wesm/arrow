@@ -28,13 +28,22 @@
 #include "arrow/util/visibility.h"
 
 namespace arrow {
+namespace detail {
+
+/// We export a virtual destructor so that we can use the Iterator<T>
+/// interfaces across multiple DLLs when compiling with MSVC (but they must all
+/// link to arrow.dll)
+class ARROW_EXPORT AbstractBase {
+ public:
+  virtual ~AbstractBase() = default;
+};
+
+}  // namespace detail
 
 /// \brief A generic Iterator that can return errors
 template <typename T>
-class Iterator {
+class Iterator : public detail::AbstractBase {
  public:
-  ARROW_FORCE_INLINE virtual ~Iterator() = default;
-
   /// \brief Return the next element of the sequence, nullptr when the
   /// iteration is completed
   virtual Status Next(T* out) = 0;

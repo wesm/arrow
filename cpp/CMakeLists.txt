@@ -352,6 +352,7 @@ endif()
 #
 
 # Determine compiler version
+
 include(CompilerInfo)
 
 if(ARROW_NO_DEPRECATED_API)

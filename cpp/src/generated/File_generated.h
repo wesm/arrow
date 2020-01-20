@@ -81,11 +81,11 @@ struct Footer FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int16_t>(verifier, VT_VERSION) &&
-           VerifyOffset(verifier, VT_SCHEMA) &&
+           VerifyOffsetRequired(verifier, VT_SCHEMA) &&
            verifier.VerifyTable(schema()) &&
            VerifyOffset(verifier, VT_DICTIONARIES) &&
            verifier.VerifyVector(dictionaries()) &&
-           VerifyOffset(verifier, VT_RECORDBATCHES) &&
+           VerifyOffsetRequired(verifier, VT_RECORDBATCHES) &&
            verifier.VerifyVector(recordBatches()) &&
            VerifyOffset(verifier, VT_CUSTOM_METADATA) &&
            verifier.VerifyVector(custom_metadata()) &&
@@ -120,6 +120,8 @@ struct FooterBuilder {
   flatbuffers::Offset<Footer> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<Footer>(end);
+    fbb_.Required(o, Footer::VT_SCHEMA);
+    fbb_.Required(o, Footer::VT_RECORDBATCHES);
     return o;
   }
 };

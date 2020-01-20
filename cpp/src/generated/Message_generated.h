@@ -166,9 +166,9 @@ struct RecordBatch FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_LENGTH) &&
-           VerifyOffset(verifier, VT_NODES) &&
+           VerifyOffsetRequired(verifier, VT_NODES) &&
            verifier.VerifyVector(nodes()) &&
-           VerifyOffset(verifier, VT_BUFFERS) &&
+           VerifyOffsetRequired(verifier, VT_BUFFERS) &&
            verifier.VerifyVector(buffers()) &&
            verifier.EndTable();
   }
@@ -194,6 +194,8 @@ struct RecordBatchBuilder {
   flatbuffers::Offset<RecordBatch> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<RecordBatch>(end);
+    fbb_.Required(o, RecordBatch::VT_NODES);
+    fbb_.Required(o, RecordBatch::VT_BUFFERS);
     return o;
   }
 };
@@ -251,7 +253,7 @@ struct DictionaryBatch FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_ID) &&
-           VerifyOffset(verifier, VT_DATA) &&
+           VerifyOffsetRequired(verifier, VT_DATA) &&
            verifier.VerifyTable(data()) &&
            VerifyField<uint8_t>(verifier, VT_ISDELTA) &&
            verifier.EndTable();
@@ -278,6 +280,7 @@ struct DictionaryBatchBuilder {
   flatbuffers::Offset<DictionaryBatch> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<DictionaryBatch>(end);
+    fbb_.Required(o, DictionaryBatch::VT_DATA);
     return o;
   }
 };
@@ -337,7 +340,7 @@ struct Message FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     return VerifyTableStart(verifier) &&
            VerifyField<int16_t>(verifier, VT_VERSION) &&
            VerifyField<uint8_t>(verifier, VT_HEADER_TYPE) &&
-           VerifyOffset(verifier, VT_HEADER) &&
+           VerifyOffsetRequired(verifier, VT_HEADER) &&
            VerifyMessageHeader(verifier, header(), header_type()) &&
            VerifyField<int64_t>(verifier, VT_BODYLENGTH) &&
            VerifyOffset(verifier, VT_CUSTOM_METADATA) &&
@@ -393,6 +396,7 @@ struct MessageBuilder {
   flatbuffers::Offset<Message> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<Message>(end);
+    fbb_.Required(o, Message::VT_HEADER);
     return o;
   }
 };

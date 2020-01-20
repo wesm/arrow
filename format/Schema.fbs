@@ -302,14 +302,14 @@ table Field {
   nullable: bool;
 
   /// This is the type of the decoded value if the field is dictionary encoded.
-  type: Type;
+  type: Type (required);
 
   /// Present only if the field is dictionary encoded.
   dictionary: DictionaryEncoding;
 
   /// children apply only to nested data types like Struct, List and Union. For
   /// primitive types children will have length 0.
-  children: [ Field ];
+  children: [ Field ] (required);
 
   /// User-defined metadata
   custom_metadata: [ KeyValue ];
@@ -345,7 +345,7 @@ table Schema {
   /// if endianness doesn't match the underlying system then the vectors need to be converted
   endianness: Endianness=Little;
 
-  fields: [Field];
+  fields: [Field] (required);
   // User-defined metadata
   custom_metadata: [ KeyValue ];
 }

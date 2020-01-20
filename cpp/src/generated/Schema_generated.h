@@ -1685,11 +1685,11 @@ struct Field FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyString(name()) &&
            VerifyField<uint8_t>(verifier, VT_NULLABLE) &&
            VerifyField<uint8_t>(verifier, VT_TYPE_TYPE) &&
-           VerifyOffset(verifier, VT_TYPE) &&
+           VerifyOffsetRequired(verifier, VT_TYPE) &&
            VerifyType(verifier, type(), type_type()) &&
            VerifyOffset(verifier, VT_DICTIONARY) &&
            verifier.VerifyTable(dictionary()) &&
-           VerifyOffset(verifier, VT_CHILDREN) &&
+           VerifyOffsetRequired(verifier, VT_CHILDREN) &&
            verifier.VerifyVector(children()) &&
            verifier.VerifyVectorOfTables(children()) &&
            VerifyOffset(verifier, VT_CUSTOM_METADATA) &&
@@ -1815,6 +1815,8 @@ struct FieldBuilder {
   flatbuffers::Offset<Field> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<Field>(end);
+    fbb_.Required(o, Field::VT_TYPE);
+    fbb_.Required(o, Field::VT_CHILDREN);
     return o;
   }
 };
@@ -1885,7 +1887,7 @@ struct Schema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int16_t>(verifier, VT_ENDIANNESS) &&
-           VerifyOffset(verifier, VT_FIELDS) &&
+           VerifyOffsetRequired(verifier, VT_FIELDS) &&
            verifier.VerifyVector(fields()) &&
            verifier.VerifyVectorOfTables(fields()) &&
            VerifyOffset(verifier, VT_CUSTOM_METADATA) &&
@@ -1915,6 +1917,7 @@ struct SchemaBuilder {
   flatbuffers::Offset<Schema> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<Schema>(end);
+    fbb_.Required(o, Schema::VT_FIELDS);
     return o;
   }
 };

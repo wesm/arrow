@@ -26,11 +26,11 @@ namespace org.apache.arrow.flatbuf;
 table Footer {
   version: org.apache.arrow.flatbuf.MetadataVersion;
 
-  schema: org.apache.arrow.flatbuf.Schema;
+  schema: org.apache.arrow.flatbuf.Schema (required);
 
   dictionaries: [ Block ];
 
-  recordBatches: [ Block ];
+  recordBatches: [ Block ] (required);
 
   /// User-defined metadata
   custom_metadata: [ KeyValue ];

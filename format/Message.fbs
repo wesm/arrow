@@ -51,7 +51,7 @@ table RecordBatch {
   length: long;
 
   /// Nodes correspond to the pre-ordered flattened logical schema
-  nodes: [FieldNode];
+  nodes: [FieldNode] (required);
 
   /// Buffers correspond to the pre-ordered flattened buffer tree
   ///
@@ -59,7 +59,7 @@ table RecordBatch {
   /// example, most primitive arrays will have 2 buffers, 1 for the validity
   /// bitmap and 1 for the values. For struct arrays, there will only be a
   /// single buffer for the validity (nulls) bitmap
-  buffers: [Buffer];
+  buffers: [Buffer] (required);
 }
 
 /// For sending dictionary encoding information. Any Field can be
@@ -71,7 +71,7 @@ table RecordBatch {
 
 table DictionaryBatch {
   id: long;
-  data: RecordBatch;
+  data: RecordBatch (required);
 
   /// If isDelta is true the values in the dictionary are to be appended to a
   /// dictionary with the indicated id. If isDelta is false this dictionary
@@ -94,7 +94,7 @@ union MessageHeader {
 
 table Message {
   version: org.apache.arrow.flatbuf.MetadataVersion;
-  header: MessageHeader;
+  header: MessageHeader (required);
   bodyLength: long;
   custom_metadata: [ KeyValue ];
 }

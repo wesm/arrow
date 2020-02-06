@@ -34,13 +34,21 @@ from . import datagen
 class IntegrationRunner(object):
 
     def __init__(self, json_files, testers, tempdir=None, debug=False,
-                 stop_on_error=True, gold_dirs=None, **unused_kwargs):
+                 stop_on_error=True, gold_dirs=None, match=None,
+                 **unused_kwargs):
         self.json_files = json_files
         self.testers = testers
         self.temp_dir = tempdir or tempfile.mkdtemp()
         self.debug = debug
         self.stop_on_error = stop_on_error
         self.gold_dirs = gold_dirs
+        self.match = match
+
+        if self.match is not None:
+            print("-- Only running tests with {} in their name"
+                  .format(self.match))
+            self.json_files = [json_file for json_file in self.json_files
+                               if self.match in json_file.name]
 
     def run(self):
         failures = []

@@ -42,6 +42,15 @@ struct FieldNode {
   null_count: long;
 }
 
+enum CompressionType {
+  UNCOMPRESSED,
+  GZIP,
+  SNAPPY,
+  LZ4,
+  ZSTD,
+  BROTLI
+}
+
 /// A data header describing the shared memory layout of a "record" or "row"
 /// batch. Some systems call this a "row batch" internally and others a "record
 /// batch".
@@ -60,6 +69,12 @@ table RecordBatch {
   /// bitmap and 1 for the values. For struct arrays, there will only be a
   /// single buffer for the validity (nulls) bitmap
   buffers: [Buffer];
+
+  /// If set, each buffer is first compressed with the indicated compressor,
+  /// and then written with the uncompressed length in the first 8 bytes as a
+  /// 64-bit signed integer followed by the compressed buffer bytes (and then
+  /// padding)
+  compression: CompressionType = UNCOMPRESSED;
 }
 
 /// For sending dictionary encoding information. Any Field can be

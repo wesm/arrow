@@ -1024,8 +1024,7 @@ Status GetKeyValueMetadata(const KVVector* fb_metadata,
     metadata->Append(pair->key()->str(), pair->value()->str());
   }
 
-  *out = metadata;
-
+  *out = std::move(metadata);
   return Status::OK();
 }
 

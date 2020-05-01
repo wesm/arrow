@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include "gandiva/arrow.h"
@@ -41,6 +42,15 @@ class GANDIVA_EXPORT Expression {
  private:
   const NodePtr root_;
   const FieldPtr result_;
+};
+
+/// \brief A condition expression.
+class Condition : public Expression {
+ public:
+  explicit Condition(const NodePtr root)
+      : Expression(root, std::make_shared<arrow::Field>("cond", arrow::boolean())) {}
+
+  virtual ~Condition() = default;
 };
 
 }  // namespace gandiva

@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+/* This is a private file, intended for internal use by gandiva & must not be included
+ * directly.
+ */
+
 #pragma once
 
 #include <memory>
@@ -27,9 +31,6 @@
 #include "gandiva/gandiva_aliases.h"
 #include "gandiva/native_function.h"
 
-/* This is a private file, intended for internal use by gandiva & must not be included
- * directly.
- */
 namespace gandiva {
 
 using arrow::binary;
@@ -226,5 +227,17 @@ typedef std::unordered_map<const FunctionSignature*, const NativeFunction*, KeyH
 // Iterate the inner macro over all numeric types, date types, bool and varlen types
 #define NUMERIC_BOOL_DATE_VAR_LEN_TYPES(INNER, NAME, ALIASES) \
   NUMERIC_BOOL_DATE_TYPES(INNER, NAME, ALIASES), VAR_LEN_TYPES(INNER, NAME, ALIASES)
+
+std::vector<NativeFunction> GetArithmeticFunctionRegistry();
+
+std::vector<NativeFunction> GetDateTimeFunctionRegistry();
+
+std::vector<NativeFunction> GetHashFunctionRegistry();
+
+std::vector<NativeFunction> GetMathOpsFunctionRegistry();
+
+std::vector<NativeFunction> GetStringFunctionRegistry();
+
+std::vector<NativeFunction> GetDateTimeArithmeticFunctionRegistry();
 
 }  // namespace gandiva

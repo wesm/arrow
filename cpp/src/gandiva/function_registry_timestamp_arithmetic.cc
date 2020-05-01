@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "gandiva/function_registry_timestamp_arithmetic.h"
-#include "gandiva/function_registry_common.h"
+#include "gandiva/function_registry_internal.h"
 
 namespace gandiva {
 

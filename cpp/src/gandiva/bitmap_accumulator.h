@@ -21,7 +21,6 @@
 
 #include "arrow/util/macros.h"
 #include "gandiva/dex.h"
-#include "gandiva/dex_visitor.h"
 #include "gandiva/eval_batch.h"
 #include "gandiva/visibility.h"
 

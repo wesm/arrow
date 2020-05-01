@@ -23,15 +23,38 @@
 #include <vector>
 
 #include "arrow/status.h"
+#include "arrow/util/logging.h"
 
 #include "gandiva/arrow.h"
 #include "gandiva/func_descriptor.h"
 #include "gandiva/gandiva_aliases.h"
 #include "gandiva/literal_holder.h"
-#include "gandiva/node_visitor.h"
 #include "gandiva/visibility.h"
 
 namespace gandiva {
+
+class FieldNode;
+class FunctionNode;
+class IfNode;
+class LiteralNode;
+class BooleanNode;
+template <typename Type>
+class InExpressionNode;
+
+/// \brief Visitor for nodes in the expression tree.
+class GANDIVA_EXPORT NodeVisitor {
+ public:
+  virtual ~NodeVisitor() = default;
+
+  virtual Status Visit(const FieldNode& node) = 0;
+  virtual Status Visit(const FunctionNode& node) = 0;
+  virtual Status Visit(const IfNode& node) = 0;
+  virtual Status Visit(const LiteralNode& node) = 0;
+  virtual Status Visit(const BooleanNode& node) = 0;
+  virtual Status Visit(const InExpressionNode<int32_t>& node) = 0;
+  virtual Status Visit(const InExpressionNode<int64_t>& node) = 0;
+  virtual Status Visit(const InExpressionNode<std::string>& node) = 0;
+};
 
 /// \brief Represents a node in the expression tree. Validity and value are
 /// in a joined state.

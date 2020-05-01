@@ -27,7 +27,7 @@
 #include "gandiva/annotator.h"
 #include "gandiva/compiled_expr.h"
 #include "gandiva/configuration.h"
-#include "gandiva/dex_visitor.h"
+#include "gandiva/dex.h"
 #include "gandiva/engine.h"
 #include "gandiva/execution_context.h"
 #include "gandiva/function_registry.h"

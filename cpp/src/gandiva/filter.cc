@@ -26,8 +26,8 @@
 
 #include "gandiva/bitmap_accumulator.h"
 #include "gandiva/cache.h"
-#include "gandiva/condition.h"
 #include "gandiva/expr_validator.h"
+#include "gandiva/expression.h"
 #include "gandiva/llvm_generator.h"
 #include "gandiva/selection_vector_impl.h"
 

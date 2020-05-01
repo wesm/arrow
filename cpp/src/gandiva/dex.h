@@ -22,7 +22,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "gandiva/dex_visitor.h"
 #include "gandiva/field_descriptor.h"
 #include "gandiva/func_descriptor.h"
 #include "gandiva/function_holder.h"
@@ -34,6 +33,68 @@
 #include "gandiva/visibility.h"
 
 namespace gandiva {
+
+class VectorReadValidityDex;
+class VectorReadFixedLenValueDex;
+class VectorReadVarLenValueDex;
+class LocalBitMapValidityDex;
+class LiteralDex;
+class TrueDex;
+class FalseDex;
+class NonNullableFuncDex;
+class NullableNeverFuncDex;
+class NullableInternalFuncDex;
+class IfDex;
+class BooleanAndDex;
+class BooleanOrDex;
+template <typename Type>
+class InExprDexBase;
+
+/// \brief Visitor for decomposed expression.
+class GANDIVA_EXPORT DexVisitor {
+ public:
+  virtual ~DexVisitor() = default;
+
+  virtual void Visit(const VectorReadValidityDex& dex) = 0;
+  virtual void Visit(const VectorReadFixedLenValueDex& dex) = 0;
+  virtual void Visit(const VectorReadVarLenValueDex& dex) = 0;
+  virtual void Visit(const LocalBitMapValidityDex& dex) = 0;
+  virtual void Visit(const TrueDex& dex) = 0;
+  virtual void Visit(const FalseDex& dex) = 0;
+  virtual void Visit(const LiteralDex& dex) = 0;
+  virtual void Visit(const NonNullableFuncDex& dex) = 0;
+  virtual void Visit(const NullableNeverFuncDex& dex) = 0;
+  virtual void Visit(const NullableInternalFuncDex& dex) = 0;
+  virtual void Visit(const IfDex& dex) = 0;
+  virtual void Visit(const BooleanAndDex& dex) = 0;
+  virtual void Visit(const BooleanOrDex& dex) = 0;
+  virtual void Visit(const InExprDexBase<int32_t>& dex) = 0;
+  virtual void Visit(const InExprDexBase<int64_t>& dex) = 0;
+  virtual void Visit(const InExprDexBase<std::string>& dex) = 0;
+};
+
+/// Default implementation with only DCHECK().
+#define VISIT_DCHECK(DEX_CLASS) \
+  void Visit(const DEX_CLASS& dex) override { DCHECK(0); }
+
+class GANDIVA_EXPORT DexDefaultVisitor : public DexVisitor {
+  VISIT_DCHECK(VectorReadValidityDex)
+  VISIT_DCHECK(VectorReadFixedLenValueDex)
+  VISIT_DCHECK(VectorReadVarLenValueDex)
+  VISIT_DCHECK(LocalBitMapValidityDex)
+  VISIT_DCHECK(TrueDex)
+  VISIT_DCHECK(FalseDex)
+  VISIT_DCHECK(LiteralDex)
+  VISIT_DCHECK(NonNullableFuncDex)
+  VISIT_DCHECK(NullableNeverFuncDex)
+  VISIT_DCHECK(NullableInternalFuncDex)
+  VISIT_DCHECK(IfDex)
+  VISIT_DCHECK(BooleanAndDex)
+  VISIT_DCHECK(BooleanOrDex)
+  VISIT_DCHECK(InExprDexBase<int32_t>)
+  VISIT_DCHECK(InExprDexBase<int64_t>)
+  VISIT_DCHECK(InExprDexBase<std::string>)
+};
 
 /// \brief Decomposed expression : the validity and value are separated.
 class GANDIVA_EXPORT Dex {

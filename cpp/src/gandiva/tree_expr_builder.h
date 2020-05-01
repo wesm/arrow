@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "arrow/type.h"
-#include "gandiva/condition.h"
 #include "gandiva/decimal_scalar.h"
 #include "gandiva/expression.h"
 #include "gandiva/visibility.h"

@@ -27,7 +27,7 @@
 
 namespace arrow {
 
-static constexpr int64_t kLength = 1024;
+static constexpr int64_t kLength = 1 << 10;
 
 template <typename Action>
 static void Bench(benchmark::State& state, Action&& action,
@@ -51,6 +51,8 @@ static void Bench(benchmark::State& state, Action&& action,
     }
     benchmark::DoNotOptimize(result);
   }
+
+  state.SetItemsProcessed(state.iterations() * kLength);
 }
 
 template <typename Operator>

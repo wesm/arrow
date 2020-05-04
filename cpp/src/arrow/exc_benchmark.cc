@@ -27,7 +27,7 @@
 
 namespace arrow {
 
-static constexpr int64_t kLength = 1000000;
+static constexpr int64_t kLength = 1024;
 
 template <typename Action>
 static void Bench(benchmark::State& state, Action&& action,

@@ -54,8 +54,7 @@ static void Bench(benchmark::State& state, Action&& action,
 }
 
 template <typename Operator>
-static bool LoopExc(const double* x, const double* y,
-                    double* out) {
+static bool LoopExc(const double* x, const double* y, double* out) {
   try {
     for (int64_t i = 0; i < kLength; ++i) {
       *out++ = Operator::Call(*x++, *y++);
@@ -66,18 +65,17 @@ static bool LoopExc(const double* x, const double* y,
   return true;
 }
 
-struct DivideExc {
+struct AddNonZeroExc {
   static double Call(double x, double y) {
     if (ARROW_PREDICT_FALSE(y == 0)) {
-      throw std::runtime_error("divisor was zero");
+      throw std::runtime_error("addend was zero");
     }
-    return x / y;
+    return x + y;
   }
 };
 
 template <typename Operator>
-static bool LoopRetval(const double* x, const double* y,
-                       double* out) {
+static bool LoopRetval(const double* x, const double* y, double* out) {
   for (int64_t i = 0; i < kLength; ++i) {
     if (ARROW_PREDICT_FALSE(Operator::Call(*x++, *y++, out++) != 0)) {
       return false;
@@ -86,12 +84,12 @@ static bool LoopRetval(const double* x, const double* y,
   return true;
 }
 
-struct DivideRetval {
+struct AddNonZeroRetval {
   static int Call(double x, double y, double* out) {
     if (ARROW_PREDICT_FALSE(y == 0)) {
       return -1;
     }
-    *out = x / y;
+    *out = x + y;
     return 0;
   }
 };
@@ -104,17 +102,16 @@ struct AddRetval {
 };
 
 struct Add {
-  static double Call(double x, double y) {
-    return x + y;
-  }
+  static double Call(double x, double y) { return x + y; }
 };
 
-static void BenchDivideRetval(benchmark::State& state) {  // NOLINT non-const reference
-  Bench(state, LoopRetval<DivideRetval>);
+static void BenchAddNonZeroRetval(
+    benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopRetval<AddNonZeroRetval>);
 }
 
-static void BenchDivideExc(benchmark::State& state) {  // NOLINT non-const reference
-  Bench(state, LoopExc<DivideExc>);
+static void BenchAddNonZeroExc(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopExc<AddNonZeroExc>);
 }
 
 static void BenchAddRetval(benchmark::State& state) {  // NOLINT non-const reference
@@ -125,8 +122,8 @@ static void BenchAddNoExc(benchmark::State& state) {  // NOLINT non-const refere
   return Bench(state, LoopExc<Add>, /*expect_fail=*/false);
 }
 
-BENCHMARK(BenchDivideExc);
-BENCHMARK(BenchDivideRetval);
+BENCHMARK(BenchAddNonZeroExc);
+BENCHMARK(BenchAddNonZeroRetval);
 BENCHMARK(BenchAddNoExc);
 BENCHMARK(BenchAddRetval);
 

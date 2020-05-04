@@ -31,7 +31,7 @@ static constexpr int64_t kLength = 1 << 10;
 
 template <typename Action>
 static void Bench(benchmark::State& state, Action&& action,
-                  bool expect_fail = true) {  // NOLINT non-const reference
+                  bool fail = false) {  // NOLINT non-const reference
   random::RandomArrayGenerator rng(0);
 
   auto x = rng.Float64(kLength, 1, 100);
@@ -40,13 +40,16 @@ static void Bench(benchmark::State& state, Action&& action,
   // Zero the last element
   auto y = rng.Float64(kLength, 1, 100);
   double* y_data = reinterpret_cast<double*>(y->data()->buffers[1]->mutable_data());
-  y_data[kLength - 1] = 0;
+
+  if (fail) {
+    y_data[kLength - 1] = 0;
+  }
 
   auto buf = AllocateBuffer(kLength * sizeof(double)).ValueOrDie();
   double* out_data = reinterpret_cast<double*>(buf->mutable_data());
   for (auto _ : state) {
     bool result = action(x_data, y_data, out_data);
-    if (expect_fail && result) {
+    if (fail && result) {
       std::abort();
     }
     benchmark::DoNotOptimize(result);
@@ -107,26 +110,37 @@ struct Add {
   static double Call(double x, double y) { return x + y; }
 };
 
-static void BenchAddNonZeroRetval(
+static void BenchAddNoFailRetval(
     benchmark::State& state) {  // NOLINT non-const reference
-  Bench(state, LoopRetval<AddNonZeroRetval>);
+  Bench(state, LoopRetval<AddNonZeroRetval>, /*fail=*/false);
 }
 
-static void BenchAddNonZeroExc(benchmark::State& state) {  // NOLINT non-const reference
-  Bench(state, LoopExc<AddNonZeroExc>);
+static void BenchAddNoFailExc(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopExc<AddNonZeroExc>, /*fail=*/false);
 }
 
-static void BenchAddRetval(benchmark::State& state) {  // NOLINT non-const reference
-  Bench(state, LoopRetval<AddRetval>, /*expect_fail=*/false);
+static void BenchAddFailRetval(
+    benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopRetval<AddNonZeroRetval>, /*fail=*/true);
 }
 
-static void BenchAddNoExc(benchmark::State& state) {  // NOLINT non-const reference
-  return Bench(state, LoopExc<Add>, /*expect_fail=*/false);
+static void BenchAddFailExc(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopExc<AddNonZeroExc>, /*fail=*/true);
 }
 
-BENCHMARK(BenchAddNonZeroExc);
-BENCHMARK(BenchAddNonZeroRetval);
-BENCHMARK(BenchAddNoExc);
-BENCHMARK(BenchAddRetval);
+static void BenchAddCantFailRetval(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopRetval<AddRetval>, /*fail=*/false);
+}
+
+static void BenchAddCantFailNoRetval(benchmark::State& state) {  // NOLINT non-const reference
+  return Bench(state, LoopExc<Add>, /*fail=*/false);
+}
+
+BENCHMARK(BenchAddNoFailRetval);
+BENCHMARK(BenchAddNoFailExc);
+BENCHMARK(BenchAddFailRetval);
+BENCHMARK(BenchAddFailExc);
+BENCHMARK(BenchAddCantFailRetval);
+BENCHMARK(BenchAddCantFailNoRetval);
 
 }  // namespace arrow

@@ -27,10 +27,11 @@
 
 namespace arrow {
 
-static constexpr int64_t kLength = 10000000;
+static constexpr int64_t kLength = 1000000;
 
 template <typename Action>
-static void Bench(benchmark::State& state, Action&& action) {  // NOLINT non-const reference
+static void Bench(benchmark::State& state, Action&& action,
+                  bool expect_fail = true) {  // NOLINT non-const reference
   random::RandomArrayGenerator rng(0);
 
   auto x = rng.Float64(kLength, 1, 100);
@@ -46,10 +47,25 @@ static void Bench(benchmark::State& state, Action&& action) {  // NOLINT non-con
 
   double* out_data = reinterpret_cast<double*>(buf->mutable_data());
   for (auto _ : state) {
-    if (action(x_data, y_data, out_data)) {
+    bool result = action(x_data, y_data, out_data);
+    if (expect_fail && result) {
       std::abort();
     }
+    benchmark::DoNotOptimize(result);
   }
+}
+
+template <typename Operator>
+static bool LoopExc(const double* x, const double* y,
+                    double* out) {
+  try {
+    for (int64_t i = 0; i < kLength; ++i) {
+      *out++ = Operator::Call(*x++, *y++);
+    }
+  } catch (const std::exception&) {
+    return false;
+  }
+  return true;
 }
 
 struct DivideExc {
@@ -57,23 +73,19 @@ struct DivideExc {
     if (ARROW_PREDICT_FALSE(y == 0)) {
       throw std::runtime_error("divisor was zero");
     }
-    return x + y;
-  }
-
-  static bool CallLoop(const double* x, const double* y, double* out) {
-    try {
-      for (int64_t i = 0; i < kLength; ++i) {
-        out[i] = Call(x[i], y[i]);
-      }
-    } catch (const std::exception&) {
-      return false;
-    }
-    return true;
+    return x / y;
   }
 };
 
-static void AbortException(benchmark::State& state) {  // NOLINT non-const reference
-  return Bench(state, DivideExc::CallLoop);
+template <typename Operator>
+static bool LoopRetval(const double* x, const double* y,
+                       double* out) {
+  for (int64_t i = 0; i < kLength; ++i) {
+    if (ARROW_PREDICT_FALSE(Operator::Call(*x++, *y++, out++) != 0)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 struct DivideRetval {
@@ -81,25 +93,43 @@ struct DivideRetval {
     if (ARROW_PREDICT_FALSE(y == 0)) {
       return -1;
     }
-    *out = x + y;
+    *out = x / y;
     return 0;
-  }
-
-  static bool CallLoop(const double* x, const double* y, double* out) {
-    for (int64_t i = 0; i < kLength; ++i) {
-      if (ARROW_PREDICT_FALSE(Call(x[i], y[i], out + i) != 0)) {
-        return false;
-      }
-    }
-    return true;
   }
 };
 
-static void AbortRetval(benchmark::State& state) {  // NOLINT non-const reference
-  Bench(state, DivideRetval::CallLoop);
+struct AddRetval {
+  static int Call(double x, double y, double* out) {
+    *out = x + y;
+    return 0;
+  }
+};
+
+struct Add {
+  static double Call(double x, double y) {
+    return x + y;
+  }
+};
+
+static void BenchDivideRetval(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopRetval<DivideRetval>);
 }
 
-BENCHMARK(AbortException);
-BENCHMARK(AbortRetval);
+static void BenchDivideExc(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopExc<DivideExc>);
+}
+
+static void BenchAddRetval(benchmark::State& state) {  // NOLINT non-const reference
+  Bench(state, LoopRetval<AddRetval>, /*expect_fail=*/false);
+}
+
+static void BenchAddNoExc(benchmark::State& state) {  // NOLINT non-const reference
+  return Bench(state, LoopExc<Add>, /*expect_fail=*/false);
+}
+
+BENCHMARK(BenchDivideExc);
+BENCHMARK(BenchDivideRetval);
+BENCHMARK(BenchAddNoExc);
+BENCHMARK(BenchAddRetval);
 
 }  // namespace arrow

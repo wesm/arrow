@@ -35,16 +35,14 @@ static void Bench(benchmark::State& state, Action&& action,
   random::RandomArrayGenerator rng(0);
 
   auto x = rng.Float64(kLength, 1, 100);
-  auto y = rng.Float64(kLength, 1, 100);
-
   const double* x_data = x->data()->GetValues<double>(1);
 
-  auto buf = AllocateBuffer(kLength * sizeof(double)).ValueOrDie();
-
-  // Fail on the last element
-  double* y_data = reinterpret_cast<double*>(x->data()->buffers[1]->mutable_data());
+  // Zero the last element
+  auto y = rng.Float64(kLength, 1, 100);
+  double* y_data = reinterpret_cast<double*>(y->data()->buffers[1]->mutable_data());
   y_data[kLength - 1] = 0;
 
+  auto buf = AllocateBuffer(kLength * sizeof(double)).ValueOrDie();
   double* out_data = reinterpret_cast<double*>(buf->mutable_data());
   for (auto _ : state) {
     bool result = action(x_data, y_data, out_data);

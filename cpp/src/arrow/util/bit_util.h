@@ -150,6 +150,12 @@ constexpr bool IsMultipleOf64(int64_t n) { return (n & 63) == 0; }
 
 constexpr bool IsMultipleOf8(int64_t n) { return (n & 7) == 0; }
 
+// Returns a mask for the bit_index lower order bits.
+// Only valid for bit_index in the range [0, 64).
+constexpr uint64_t PartialWordMask(uint64_t bit_index) {
+  return (static_cast<uint64_t>(1) << bit_index) - 1;
+}
+
 // Returns 'value' rounded up to the nearest multiple of 'factor'
 constexpr int64_t RoundUp(int64_t value, int64_t factor) {
   return CeilDiv(value, factor) * factor;
@@ -499,6 +505,8 @@ class BitmapReader {
 
   int64_t position() const { return position_; }
 
+  int64_t length() const { return length_; }
+
  private:
   const uint8_t* bitmap_;
   int64_t position_;
@@ -508,6 +516,114 @@ class BitmapReader {
   int64_t byte_offset_;
   int64_t bit_offset_;
 };
+
+struct BitRun {
+  int64_t length;
+  // Whether bits are set at this point.
+  bool set;
+
+  std::string ToString() const {
+    return std::string("{Length: ") + std::to_string(length) +
+           ", set=" + std::to_string(set) + "}";
+  }
+};
+
+static inline bool operator==(const BitRun& lhs, const BitRun& rhs) {
+  return lhs.length == rhs.length && lhs.set == rhs.set;
+}
+
+class BitRunReaderScalar {
+ public:
+  BitRunReaderScalar(const uint8_t* bitmap, int64_t start_offset, int64_t length)
+      : reader_(bitmap, start_offset, length) {}
+
+  BitRun NextRun() {
+    BitRun rl = {/*length=*/0, reader_.IsSet()};
+    // Advance while the values are equal and not at the end of list.
+    while (reader_.position() < reader_.length() && reader_.IsSet() == rl.set) {
+      rl.length++;
+      reader_.Next();
+    }
+    return rl;
+  }
+
+ private:
+  BitmapReader reader_;
+};
+
+#if defined(ARROW_LITTLE_ENDIAN)
+/// A convenience class for counting the number of continguous set/unset bits
+/// in a bitmap.
+class ARROW_EXPORT BitRunReader {
+ public:
+  /// \brief Constructs new BitRunReader.
+  ///
+  /// \param[in] bitmap source data
+  /// \param[in] start_offset bit offset into the source data
+  /// \param[in] length number of bits to copy
+  BitRunReader(const uint8_t* bitmap, int64_t start_offset, int64_t length);
+
+  /// Returns a new BitRun containing the number of contiguous
+  /// bits with the same value.  length == 0 indicates the
+  /// end of the bitmap.
+  BitRun NextRun() {
+    if (ARROW_PREDICT_FALSE(position_ >= length_)) {
+      return {/*length=*/0, false};
+    }
+    // This implementation relies on a efficient implementations of
+    // CountTrailingZeros and assumes that runs are more often then
+    // not.  The logic is to incrementally find the next bit change
+    // from the current position.  This is done by zeroing all
+    // bits in word_ up to position_ and using the TrailingZeroCount
+    // to find the index of the next set bit.
+
+    // The runs alternate on each call, so flip the bit.
+    current_run_bit_set_ = !current_run_bit_set_;
+
+    // Invert the word for proper use of CountTrailingZeros and
+    // clear bits so CountTrailingZeros can do it magic.
+    InvertRemainingBits();
+
+    int64_t start_position = position_;
+    // Go  forward until the next change from unset to set.
+    int64_t new_bits = BitUtil::CountTrailingZeros(word_) - (start_position % 64);
+    position_ += new_bits;
+
+    if (ARROW_PREDICT_FALSE(BitUtil::IsMultipleOf64(position_)) &&
+        ARROW_PREDICT_TRUE(position_ < length_)) {
+      // Continue extending position while we can advance an entire word.
+      // (updates position_ accordingly). This is purposefully not inlined
+      // because it hurts performance on parquet benchmarks that use
+      // rle_encoding.h decoding.
+      AdvanceTillChange();
+    }
+
+    return {/*length=*/position_ - start_position, current_run_bit_set_};
+  }
+
+ private:
+  void AdvanceTillChange();
+  void InvertRemainingBits() {
+    // Keep all ask more significant then the least significant set bit.
+    // Algorithm from
+    // https://en.wikipedia.org/wiki/Bit_Manipulation_Instruction_Sets
+    // BLSMSK
+    word_ = ~word_ & ~(word_ ^ (word_ - 1));
+  }
+
+  void LoadInitialWord();
+  void LoadNextWord();
+  // Helper method for Loading the next word.
+  void LoadWord(int64_t bits_remaining);
+  const uint8_t* bitmap_;
+  int64_t position_;
+  int64_t length_;
+  uint64_t word_;
+  bool current_run_bit_set_;
+};
+#else
+using BitRunReader = BitRunReaderScalar;
+#endif
 
 class BitmapWriter {
   // A sequential bitwise writer that preserves surrounding bit values.

@@ -188,6 +188,44 @@ static void BenchmarkBitmapReader(benchmark::State& state, int64_t nbytes) {
   state.SetBytesProcessed(2LL * state.iterations() * nbytes);
 }
 
+template <typename BitRunReaderType>
+static void BenchmarkBitRunReader(benchmark::State& state, int set_percentage) {
+  ::arrow::random::RandomArrayGenerator rag(/*seed=*/23);
+  constexpr int64_t kNumBits = 4096;
+  double set_probability =
+      static_cast<double>(set_percentage == -1 ? 0 : set_percentage) / 100.0;
+  std::shared_ptr<Buffer> buffer =
+      rag.Boolean(kNumBits, set_probability)->data()->buffers[1];
+
+  const uint8_t* bitmap = buffer->data();
+  if (set_percentage == -1) {
+    internal::BitmapWriter writer(buffer->mutable_data(), /*start_offset=*/0,
+                                  /*length=*/kNumBits);
+    for (int x = 0; x < kNumBits; x++) {
+      if (x % 2 == 0) {
+        writer.Set();
+      } else {
+        writer.Clear();
+      }
+      writer.Next();
+    }
+  }
+
+  for (auto _ : state) {
+    {
+      BitRunReaderType reader(bitmap, 0, kNumBits);
+      int64_t set_total = 0;
+      internal::BitRun br;
+      do {
+        br = reader.NextRun();
+        set_total += br.set ? br.length : 0;
+      } while (br.length != 0);
+      benchmark::DoNotOptimize(set_total);
+    }
+  }
+  state.SetBytesProcessed(state.iterations() * (kNumBits / 8));
+}
+
 template <typename VisitBitsFunctorType>
 static void BenchmarkVisitBits(benchmark::State& state, int64_t nbytes) {
   std::shared_ptr<Buffer> buffer = CreateRandomBuffer(nbytes);
@@ -268,6 +306,14 @@ static void BenchmarkGenerateBits(benchmark::State& state, int64_t nbytes) {
 
 static void BitmapReader(benchmark::State& state) {
   BenchmarkBitmapReader<internal::BitmapReader>(state, state.range(0));
+}
+
+static void BitRunReader(benchmark::State& state) {
+  BenchmarkBitRunReader<internal::BitRunReader>(state, state.range(0));
+}
+
+static void BitRunReaderScalar(benchmark::State& state) {
+  BenchmarkBitRunReader<internal::BitRunReaderScalar>(state, state.range(0));
 }
 
 static void BitmapWriter(benchmark::State& state) {
@@ -510,6 +556,24 @@ BENCHMARK(ReferenceNaiveBitmapReader)->Arg(kBufferSize);
 #endif
 
 BENCHMARK(BitmapReader)->Arg(kBufferSize);
+BENCHMARK(BitRunReader)
+    ->Arg(-1)
+    ->Arg(0)
+    ->Arg(10)
+    ->Arg(25)
+    ->Arg(50)
+    ->Arg(60)
+    ->Arg(75)
+    ->Arg(99);
+BENCHMARK(BitRunReaderScalar)
+    ->Arg(-1)
+    ->Arg(0)
+    ->Arg(10)
+    ->Arg(25)
+    ->Arg(50)
+    ->Arg(60)
+    ->Arg(75)
+    ->Arg(99);
 BENCHMARK(VisitBits)->Arg(kBufferSize);
 BENCHMARK(VisitBitsUnrolled)->Arg(kBufferSize);
 BENCHMARK(SetBitsTo)->Arg(2)->Arg(1 << 4)->Arg(1 << 10)->Arg(1 << 17);

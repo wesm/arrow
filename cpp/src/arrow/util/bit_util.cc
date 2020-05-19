@@ -511,6 +511,71 @@ Result<std::shared_ptr<Buffer>> BitmapOp(MemoryPool* pool, const uint8_t* left,
 
 }  // namespace
 
+BitRunReader::BitRunReader(const uint8_t* bitmap, int64_t start_offset, int64_t length)
+    : bitmap_(bitmap + (start_offset / 8)),
+      position_(start_offset % 8),
+      length_(position_ + length) {
+  if (ARROW_PREDICT_FALSE(length == 0)) {
+    word_ = 0;
+    return;
+  }
+
+  // Prepare for inversion in NextRun.
+  current_run_bit_set_ = !BitUtil::GetBit(bitmap, start_offset);
+  LoadInitialWord();
+  // Clear out any preceding bits.
+  word_ = word_ & ~BitUtil::PartialWordMask(position_);
+}
+
+void BitRunReader::AdvanceTillChange() {
+  int64_t new_bits = 0;
+  do {
+    // Advance the position of the bitmap for loading.
+    bitmap_ += sizeof(uint64_t);
+    LoadNextWord();
+    new_bits = BitUtil::CountTrailingZeros(word_);
+    // Continue calculating run length.
+    position_ += new_bits;
+  } while (ARROW_PREDICT_FALSE(position_ % 64 == 0) &&
+           ARROW_PREDICT_TRUE(position_ < length_) && new_bits > 0);
+}
+
+void BitRunReader::LoadInitialWord() {
+  // On the initial load if there is an offset we need to account for this when
+  // loading bytes.  Every other call to LoadWord() should only occur when
+  // position_ is a multiple of 64.
+  int64_t shift_offset = position_ % 8;
+  int64_t bits_remaining = (length_ - position_) + shift_offset;
+  bits_remaining += (bits_remaining % 8) == 0 && shift_offset > 0;
+  return LoadWord(bits_remaining);
+}
+
+void BitRunReader::LoadNextWord() { return LoadWord(length_ - position_); }
+
+void BitRunReader::LoadWord(int64_t bits_remaining) {
+  word_ = 0;
+  // we need at least an extra byte in this case.
+  if (ARROW_PREDICT_TRUE(bits_remaining >= 64)) {
+    std::memcpy(&word_, bitmap_, 8);
+  } else {
+    int64_t bytes_to_load = BitUtil::BytesForBits(bits_remaining);
+    auto word_ptr = reinterpret_cast<uint8_t*>(&word_);
+    std::memcpy(word_ptr, bitmap_, bytes_to_load);
+    // Ensure stoppage at last bit in bitmap by reversing the next higher
+    // order bit.
+    BitUtil::SetBitTo(word_ptr, bits_remaining,
+                      !BitUtil::GetBit(word_ptr, bits_remaining - 1));
+  }
+
+  // Two cases:
+  //   1. For unset, CountTrailingZeros works natually so we don't
+  //   invert the word.
+  //   2. Otherwise invert so we can use CountTrailingZeros.
+  if (current_run_bit_set_) {
+    word_ = ~word_;
+  }
+}
+
 std::string Bitmap::ToString() const {
   std::string out(length_ + ((length_ - 1) / 8), ' ');
   for (int64_t i = 0; i < length_; ++i) {

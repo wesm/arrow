@@ -279,7 +279,6 @@ class build_ext(_build_ext):
             self.spawn(['cmake'] + extra_cmake_args + cmake_options + [source])
             print("-- Finished cmake for pyarrow")
 
-            # Do the build
             print("-- Running cmake --build for pyarrow")
             self.spawn(['cmake', '--build', '.', '--config', self.build_type] +
                        build_tool_args)

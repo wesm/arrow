@@ -208,6 +208,7 @@ endif()
 
 # Arrow
 find_package(ArrowPython REQUIRED)
+
 include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 
 function(bundle_arrow_lib library_path)
@@ -225,28 +226,17 @@ function(bundle_arrow_lib library_path)
 
   get_filename_component(LIBRARY_DIR ${${library_path}} DIRECTORY)
   get_filename_component(LIBRARY_NAME ${${library_path}} NAME_WE)
+
   configure_file(
     ${${library_path}}
-    ${BUILD_OUTPUT_ROOT_DIRECTORY}/${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX} COPYONLY)
-
-  if(APPLE)
-    configure_file(
-      ${LIBRARY_DIR}/${LIBRARY_NAME}.${ARG_SO_VERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}
-      ${BUILD_OUTPUT_ROOT_DIRECTORY}/${LIBRARY_NAME}.${ARG_SO_VERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}
-      COPYONLY)
-  elseif(NOT MSVC)
-    configure_file(
-      ${${library_path}}.${ARG_SO_VERSION}
-      ${BUILD_OUTPUT_ROOT_DIRECTORY}/${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}.${ARG_SO_VERSION}
-      COPYONLY)
-  endif()
-
+    ${BUILD_OUTPUT_ROOT_DIRECTORY}/${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
+    COPYONLY)
 endfunction(bundle_arrow_lib)
 
 function(bundle_arrow_import_lib library_path)
   get_filename_component(LIBRARY_DIR ${${library_path}} DIRECTORY)
   get_filename_component(LIBRARY_NAME ${${library_path}} NAME_WE)
-  configure_file(${${library_path}} ${BUILD_OUTPUT_ROOT_DIRECTORY}/${LIBRARY_NAME}.lib
+  configure_file(${${library_path}} ${BUILD_OUTPUT_ROOT_DIRECTORY}/lib/${LIBRARY_NAME}.lib
                  COPYONLY)
 endfunction(bundle_arrow_import_lib)
 
@@ -318,7 +308,7 @@ function(bundle_arrow_dependency library_name)
   endif()
 endfunction()
 
-# Always bundle includes
+# Always bundle Arrow includes
 file(COPY ${ARROW_INCLUDE_DIR}/arrow DESTINATION ${BUILD_OUTPUT_ROOT_DIRECTORY}/include)
 
 if(PYARROW_BUNDLE_ARROW_CPP)

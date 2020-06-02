@@ -18,13 +18,13 @@
 # under the License.
 
 import contextlib
-import glob
 import os
 import os.path as osp
 import re
 import shlex
 import shutil
 import sys
+import tempfile
 
 from Cython.Distutils import build_ext as _build_ext
 import Cython
@@ -75,6 +75,57 @@ class clean(_clean):
                 pass
 
 
+ALL_ARROW_SHARED_LIBS = [
+    'arrow',
+    'arrow_cuda',
+    'arrow_dataset',
+    'arrow_flight',
+    'arrow_python',
+    'arrow_python_flight',
+    'gandiva',
+    'parquet',
+    'plasma'
+]
+
+ALL_ARROW_INCLUDE_DIRS = [
+    'arrow',
+    'gandiva',
+    'parquet',
+    'plasma'
+]
+
+
+class TemporaryArrowHome:
+    """
+    Relocates shared libraries without ABI tags and includes to a temporary
+    location while building the wheel so that we are assured to link to
+    $LIBRARY.so instead of libarrow.so.$ABI_VERSION
+    """
+    def __init__(self):
+        self.path = tempfile.mkdtemp()
+        current_home = os.environ['ARROW_HOME']
+
+        # Copy shared libs
+        os.mkdir(pjoin(self.path, 'lib'))
+        for name in ALL_ARROW_SHARED_LIBS:
+            so_name = 'lib{}.so'.format(name)
+            current_path = pjoin(current_home, 'lib', so_name)
+            temp_path = pjoin(self.path, 'lib', so_name)
+            if os.path.exists(current_path):
+                shutil.copy(current_path, temp_path)
+
+        # Copy includes
+        os.mkdir(pjoin(self.path, 'include'))
+        for name in ALL_ARROW_INCLUDE_DIRS:
+            current_path = pjoin(current_home, 'include', name)
+            temp_path = pjoin(self.path, 'include', name)
+            if os.path.exists(current_path):
+                shutil.copytree(current_path, temp_path)
+
+    def delete(self):
+        shutil.rmtree(self.path)
+
+
 class build_ext(_build_ext):
     _found_names = ()
 
@@ -119,6 +170,9 @@ class build_ext(_build_ext):
                       'enable Cython code coverage'),
                      ('bundle-boost', None,
                       'bundle the (shared) Boost libraries'),
+                     ('bundle-cython-cpp', None,
+                      'bundle generated Cython C++ code '
+                      '(used for code coverage)'),
                      ('bundle-arrow-cpp', None,
                       'bundle the Arrow C++ libraries')] +
                     _build_ext.user_options)
@@ -170,6 +224,8 @@ class build_ext(_build_ext):
             os.environ.get('PYARROW_GENERATE_COVERAGE', '0'))
         self.bundle_arrow_cpp = strtobool(
             os.environ.get('PYARROW_BUNDLE_ARROW_CPP', '0'))
+        self.bundle_cython_cpp = strtobool(
+            os.environ.get('PYARROW_BUNDLE_CYTHON_CPP', '0'))
         self.bundle_boost = strtobool(
             os.environ.get('PYARROW_BUNDLE_BOOST', '0'))
 
@@ -206,6 +262,13 @@ class build_ext(_build_ext):
 
         if not os.path.isdir(build_temp):
             self.mkpath(build_temp)
+
+        # We have to trick Linux and macOS into ignoring the shared libraries
+        # with ABI tags. Horrible horrible horrible.
+        if self.bundle_arrow_cpp and sys.platform != 'win32':
+            self.temp_arrow_home = TemporaryArrowHome()
+        else:
+            self.temp_arrow_home = None
 
         # Change to the build directory
         with changed_dir(build_temp):
@@ -255,6 +318,10 @@ class build_ext(_build_ext):
 
             cmake_options.append('-DCMAKE_BUILD_TYPE={0}'
                                  .format(self.build_type.lower()))
+
+            if self.temp_arrow_home is not None:
+                cmake_options.append('-DARROW_HOME={0}'
+                                     .format(self.temp_arrow_home.path))
 
             if self.boost_namespace != 'boost':
                 cmake_options.append('-DBoost_NAMESPACE={}'
@@ -319,27 +386,15 @@ class build_ext(_build_ext):
                     raise RuntimeError('pyarrow C-extension failed to build:',
                                        os.path.abspath(built_path))
 
-                cpp_generated_path = self.get_ext_generated_cpp_source(name)
-                if not os.path.exists(cpp_generated_path):
-                    raise RuntimeError('expected to find generated C++ file '
-                                       'in {0!r}'.format(cpp_generated_path))
-
-                # The destination path to move the generated C++ source to
-                # (for Cython source coverage)
-                cpp_path = pjoin(build_lib, self._get_build_dir(),
-                                 os.path.basename(cpp_generated_path))
-                if os.path.exists(cpp_path):
-                    os.remove(cpp_path)
-
                 # The destination path to move the built C extension to
                 ext_path = pjoin(build_lib, self._get_cmake_ext_path(name))
                 if os.path.exists(ext_path):
                     os.remove(ext_path)
                 self.mkpath(os.path.dirname(ext_path))
 
-                print('Moving generated C++ source', cpp_generated_path,
-                      'to build path', cpp_path)
-                shutil.move(cpp_generated_path, cpp_path)
+                if self.bundle_cython_cpp:
+                    self._bundle_cython_cpp(name, build_lib)
+
                 print('Moving built C-extension', built_path,
                       'to build path', ext_path)
                 shutil.move(built_path, ext_path)
@@ -351,40 +406,7 @@ class build_ext(_build_ext):
                                       name + '_api.h'))
 
             if self.bundle_arrow_cpp:
-                print(pjoin(build_lib, 'pyarrow'))
-                move_shared_libs(build_prefix, build_lib, "arrow")
-                move_shared_libs(build_prefix, build_lib, "arrow_python")
-                if self.with_cuda:
-                    move_shared_libs(build_prefix, build_lib, "arrow_cuda")
-                if self.with_flight:
-                    move_shared_libs(build_prefix, build_lib, "arrow_flight")
-                    move_shared_libs(build_prefix, build_lib,
-                                     "arrow_python_flight")
-                if self.with_dataset:
-                    move_shared_libs(build_prefix, build_lib, "arrow_dataset")
-                if self.with_plasma:
-                    move_shared_libs(build_prefix, build_lib, "plasma")
-                if self.with_gandiva:
-                    move_shared_libs(build_prefix, build_lib, "gandiva")
-                if self.with_parquet and not self.with_static_parquet:
-                    move_shared_libs(build_prefix, build_lib, "parquet")
-                if not self.with_static_boost and self.bundle_boost:
-                    move_shared_libs(
-                        build_prefix, build_lib,
-                        "{}_regex".format(self.boost_namespace),
-                        implib_required=False)
-                if sys.platform == 'win32':
-                    # zlib uses zlib.dll for Windows
-                    zlib_lib_name = 'zlib'
-                    move_shared_libs(build_prefix, build_lib, zlib_lib_name,
-                                     implib_required=False)
-                    if self.with_flight:
-                        # DLL dependencies for gRPC / Flight
-                        for lib_name in ['cares', 'libprotobuf',
-                                         'libcrypto-1_1-x64',
-                                         'libssl-1_1-x64']:
-                            move_shared_libs(build_prefix, build_lib, lib_name,
-                                             implib_required=False)
+                self._bundle_arrow_cpp(build_prefix, build_lib)
 
             if self.with_plasma:
                 # Move the plasma store
@@ -393,6 +415,58 @@ class build_ext(_build_ext):
                                       self._get_build_dir(),
                                       "plasma-store-server")
                 shutil.move(source, target)
+
+    def _bundle_arrow_cpp(self, build_prefix, build_lib):
+        print(pjoin(build_lib, 'pyarrow'))
+        move_shared_libs(build_prefix, build_lib, "arrow")
+        move_shared_libs(build_prefix, build_lib, "arrow_python")
+        if self.with_cuda:
+            move_shared_libs(build_prefix, build_lib, "arrow_cuda")
+        if self.with_flight:
+            move_shared_libs(build_prefix, build_lib, "arrow_flight")
+            move_shared_libs(build_prefix, build_lib,
+                             "arrow_python_flight")
+        if self.with_dataset:
+            move_shared_libs(build_prefix, build_lib, "arrow_dataset")
+        if self.with_plasma:
+            move_shared_libs(build_prefix, build_lib, "plasma")
+        if self.with_gandiva:
+            move_shared_libs(build_prefix, build_lib, "gandiva")
+        if self.with_parquet and not self.with_static_parquet:
+            move_shared_libs(build_prefix, build_lib, "parquet")
+        if not self.with_static_boost and self.bundle_boost:
+            move_shared_libs(
+                build_prefix, build_lib,
+                "{}_regex".format(self.boost_namespace),
+                implib_required=False)
+        if sys.platform == 'win32':
+            # zlib uses zlib.dll for Windows
+            zlib_lib_name = 'zlib'
+            move_shared_libs(build_prefix, build_lib, zlib_lib_name,
+                             implib_required=False)
+            if self.with_flight:
+                # DLL dependencies for gRPC / Flight
+                for lib_name in ['cares', 'libprotobuf',
+                                 'libcrypto-1_1-x64',
+                                 'libssl-1_1-x64']:
+                    move_shared_libs(build_prefix, build_lib, lib_name,
+                                     implib_required=False)
+
+    def _bundle_cython_cpp(self, name, lib_path):
+        cpp_generated_path = self.get_ext_generated_cpp_source(name)
+        if not os.path.exists(cpp_generated_path):
+            raise RuntimeError('expected to find generated C++ file '
+                               'in {0!r}'.format(cpp_generated_path))
+
+        # The destination path to move the generated C++ source to
+        # (for Cython source coverage)
+        cpp_path = pjoin(lib_path, self._get_build_dir(),
+                         os.path.basename(cpp_generated_path))
+        if os.path.exists(cpp_path):
+            os.remove(cpp_path)
+        print('Moving generated C++ source', cpp_generated_path,
+              'to build path', cpp_path)
+        shutil.move(cpp_generated_path, cpp_path)
 
     def _failure_permitted(self, name):
         if name == '_parquet' and not self.with_parquet:
@@ -475,7 +549,7 @@ def move_shared_libs(build_prefix, build_lib, lib_name,
         _move_shared_libs_unix(build_prefix, build_lib, lib_name)
 
 
-def _move_shared_libs_unix(build_prefix, build_lib, lib_name):
+def _move_shared_libs_unix(build_prefix, lib_path, lib_name):
     shared_library_prefix = 'lib'
     if sys.platform == 'darwin':
         shared_library_suffix = '.dylib'
@@ -484,29 +558,18 @@ def _move_shared_libs_unix(build_prefix, build_lib, lib_name):
 
     lib_filename = (shared_library_prefix + lib_name +
                     shared_library_suffix)
-    # Also copy libraries with ABI/SO version suffix
-    if sys.platform == 'darwin':
-        lib_pattern = (shared_library_prefix + lib_name +
-                       ".*" + shared_library_suffix[1:])
-        libs = glob.glob(pjoin(build_prefix, lib_pattern))
-    else:
-        libs = glob.glob(pjoin(build_prefix, lib_filename) + '*')
 
-    if not libs:
+    # We only copy the library without the ABI number so that we don't end up
+    # with multiple copies of the shared libraries in the wheel
+    lib_full_path = pjoin(build_prefix, lib_filename)
+
+    if not os.path.exists(lib_full_path):
         raise Exception('Could not find library:' + lib_filename +
                         ' in ' + build_prefix)
 
-    # Longest suffix library should be copied, all others symlinked
-    libs.sort(key=lambda s: -len(s))
-    print(libs, libs[0])
-    lib_filename = os.path.basename(libs[0])
-    shutil.move(pjoin(build_prefix, lib_filename),
-                pjoin(build_lib, 'pyarrow', lib_filename))
-    for lib in libs[1:]:
-        filename = os.path.basename(lib)
-        link_name = pjoin(build_lib, 'pyarrow', filename)
-        if not os.path.exists(link_name):
-            os.symlink(lib_filename, link_name)
+    dest_path = pjoin(lib_path, 'pyarrow', lib_filename)
+    print("Bundling {} to {}".format(lib_full_path, dest_path))
+    shutil.copy(lib_full_path, dest_path)
 
 
 # If the event of not running from a git clone (e.g. from a git archive

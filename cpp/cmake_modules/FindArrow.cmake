@@ -344,7 +344,7 @@ function(arrow_find_package
   set(${prefix}_LIBS "${lib_dir}" PARENT_SCOPE)
 endfunction()
 
-if(NOT "$ENV{ARROW_HOME}" STREQUAL "")
+if(NOT ARROW_HOME AND NOT "$ENV{ARROW_HOME}" STREQUAL "")
   file(TO_CMAKE_PATH "$ENV{ARROW_HOME}" ARROW_HOME)
 endif()
 arrow_find_package(ARROW

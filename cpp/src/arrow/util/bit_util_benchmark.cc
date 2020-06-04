@@ -226,6 +226,45 @@ static void BenchmarkBitRunReader(benchmark::State& state, int set_percentage) {
   state.SetBytesProcessed(state.iterations() * (kNumBits / 8));
 }
 
+static void BenchmarkBitRunReaderWithScanner(benchmark::State& state, int set_percentage) {
+  ::arrow::random::RandomArrayGenerator rag(/*seed=*/23);
+  constexpr int64_t kNumBits = 4096;
+  double set_probability =
+      static_cast<double>(set_percentage == -1 ? 0 : set_percentage) / 100.0;
+  std::shared_ptr<Buffer> buffer =
+      rag.Boolean(kNumBits, set_probability)->data()->buffers[1];
+
+  const uint8_t* bitmap = buffer->data();
+  if (set_percentage == -1) {
+    internal::BitmapWriter writer(buffer->mutable_data(), /*start_offset=*/0,
+                                  /*length=*/kNumBits);
+    for (int x = 0; x < kNumBits; x++) {
+      if (x % 2 == 0) {
+        writer.Set();
+      } else {
+        writer.Clear();
+      }
+      writer.Next();
+    }
+  }
+
+  for (auto _ : state) {
+    {
+      internal::BitmapScanner reader(bitmap, 0, kNumBits);
+      int64_t set_total = 0;
+      while (true) {
+        auto run = reader.NextRun();
+        if (run.first == 0) {
+          break;
+        }
+        set_total += run.second;
+      }
+      benchmark::DoNotOptimize(set_total);
+    }
+  }
+  state.SetBytesProcessed(state.iterations() * (kNumBits / 8));
+}
+
 template <typename VisitBitsFunctorType>
 static void BenchmarkVisitBits(benchmark::State& state, int64_t nbytes) {
   std::shared_ptr<Buffer> buffer = CreateRandomBuffer(nbytes);
@@ -310,6 +349,10 @@ static void BitmapReader(benchmark::State& state) {
 
 static void BitRunReader(benchmark::State& state) {
   BenchmarkBitRunReader<internal::BitRunReader>(state, state.range(0));
+}
+
+static void BitRunReaderWithScanner(benchmark::State& state) {
+  BenchmarkBitRunReaderWithScanner(state, state.range(0));
 }
 
 static void BitRunReaderScalar(benchmark::State& state) {
@@ -557,6 +600,15 @@ BENCHMARK(ReferenceNaiveBitmapReader)->Arg(kBufferSize);
 
 BENCHMARK(BitmapReader)->Arg(kBufferSize);
 BENCHMARK(BitRunReader)
+    ->Arg(-1)
+    ->Arg(0)
+    ->Arg(10)
+    ->Arg(25)
+    ->Arg(50)
+    ->Arg(60)
+    ->Arg(75)
+    ->Arg(99);
+BENCHMARK(BitRunReaderWithScanner)
     ->Arg(-1)
     ->Arg(0)
     ->Arg(10)

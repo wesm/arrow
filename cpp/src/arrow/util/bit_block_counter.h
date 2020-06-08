@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "arrow/util/bit_util.h"
 #include "arrow/util/bitmap_ops.h"
@@ -25,6 +26,9 @@
 #include "arrow/util/visibility.h"
 
 namespace arrow {
+
+class Buffer;
+
 namespace internal {
 
 /// \brief Return value from bit block counters: the total number of bits and
@@ -93,6 +97,40 @@ class ARROW_EXPORT BitBlockCounter {
   const uint8_t* bitmap_;
   int64_t bits_remaining_;
   int64_t offset_;
+};
+
+/// \brief A tool to iterate through a possibly non-existent validity bitmap,
+/// to allow us to write one code path for both the with-nulls and no-nulls
+/// cases without giving up a lot of performance
+class OptionalBitBlockCounter {
+ public:
+  static constexpr int16_t kMaxBlockSize = std::numeric_limits<int16_t>::max();
+
+  OptionalBitBlockCounter(const uint8_t* validity_bitmap, int64_t offset,
+                          int64_t length);
+
+  OptionalBitBlockCounter(const std::shared_ptr<Buffer>& validity_bitmap, int64_t offset,
+                          int64_t length);
+
+  /// Return block count for next word when the bitmap is
+  BitBlockCount NextBlock() {
+    if (has_bitmap_) {
+      BitBlockCount block = counter.NextWord();
+      position_ += block.length;
+      return block;
+    } else {
+      int16_t block_size = std::min(kMaxBlockSize, length_ - position_);
+      position_ += block_size;
+      // All values are non-null
+      return {block_size, block_size};
+    }
+  }
+
+ private:
+  BitBlockCounter counter_;
+  int64_t position_;
+  int64_t length_;
+  bool has_bitmap_;
 };
 
 /// \brief A class that computes popcounts on the result of bitwise operations

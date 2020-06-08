@@ -70,6 +70,18 @@ BitBlockCount BitBlockCounter::NextFourWords() {
   return {256, static_cast<int16_t>(total_popcount)};
 }
 
+OptionalBitBlockCounter::OptionalBitBlockCounter(
+    const uint8_t* validity_bitmap, int64_t offset, int64_t length)
+    : counter_(validity_bitmap, offset, length),
+      position_(0),
+      length_(length),
+      has_bitmap_(validity_bitmap != nullptr) {}
+
+OptionalBitBlockCounter::OptionalBitBlockCounter(
+    const std::shared_ptr<Buffer>& validity_bitmap, int64_t offset, int64_t length)
+    : OptionalBitBlockCounter(validity_bitmap ? validity_bitmap->data() : nullptr,
+                              offset, length) {}
+
 BitBlockCount BinaryBitBlockCounter::NextAndWord() {
   auto load_word = [](const uint8_t* bytes) -> uint64_t {
     return BitUtil::ToLittleEndian(util::SafeLoadAs<uint64_t>(bytes));

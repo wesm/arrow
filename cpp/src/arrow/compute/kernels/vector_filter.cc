@@ -28,50 +28,7 @@ namespace arrow {
 namespace compute {
 namespace internal {
 
-// IndexSequence which yields the indices of positions in a BooleanArray
-// which are either null or true
-template <FilterOptions::NullSelectionBehavior NullSelectionBehavior>
-class FilterIndexSequence {
- public:
-  // constexpr so we'll never instantiate bounds checking
-  constexpr bool never_out_of_bounds() const { return true; }
-  void set_never_out_of_bounds() {}
-
-  constexpr FilterIndexSequence() = default;
-
-  FilterIndexSequence(const BooleanArray& filter, int64_t out_length)
-      : filter_(&filter), out_length_(out_length) {}
-
-  std::pair<int64_t, bool> Next() {
-    if (NullSelectionBehavior == FilterOptions::DROP) {
-      // skip until an index is found at which the filter is true
-      while (filter_->IsNull(index_) || !filter_->Value(index_)) {
-        ++index_;
-      }
-      return std::make_pair(index_++, true);
-    }
-
-    // skip until an index is found at which the filter is either null or true
-    while (filter_->IsValid(index_) && !filter_->Value(index_)) {
-      ++index_;
-    }
-    bool is_valid = filter_->IsValid(index_);
-    return std::make_pair(index_++, is_valid);
-  }
-
-  int64_t length() const { return out_length_; }
-
-  int64_t null_count() const {
-    if (NullSelectionBehavior == FilterOptions::DROP) {
-      return 0;
-    }
-    return filter_->null_count();
-  }
-
- private:
-  const BooleanArray* filter_ = nullptr;
-  int64_t index_ = 0, out_length_ = -1;
-};
+using FilterState = OptionsWrapper<FilterOptions>;
 
 int64_t FilterOutputSize(FilterOptions::NullSelectionBehavior null_selection,
                          const Array& arr) {
@@ -92,21 +49,6 @@ int64_t FilterOutputSize(FilterOptions::NullSelectionBehavior null_selection,
     }
   }
   return size;
-}
-
-struct FilterState : public KernelState {
-  explicit FilterState(FilterOptions options) : options(std::move(options)) {}
-  FilterOptions options;
-};
-
-std::unique_ptr<KernelState> InitFilter(KernelContext*, const KernelInitArgs& args) {
-  FilterOptions options;
-  if (args.options == nullptr) {
-    options = FilterOptions::Defaults();
-  } else {
-    options = *static_cast<const FilterOptions*>(args.options);
-  }
-  return std::unique_ptr<KernelState>(new FilterState(std::move(options)));
 }
 
 template <typename ValueType>
@@ -218,7 +160,7 @@ class FilterMetaFunction : public MetaFunction {
 
 void RegisterVectorFilter(FunctionRegistry* registry) {
   VectorKernel base;
-  base.init = InitFilter;
+  base.init = InitWrapOptions<FilterOptions>;
 
   auto filter = std::make_shared<VectorFunction>("array_filter", Arity::Binary());
   InputType filter_ty = InputType::Array(boolean());

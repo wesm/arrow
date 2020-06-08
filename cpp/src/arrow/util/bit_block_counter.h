@@ -107,8 +107,6 @@ class ARROW_EXPORT BitBlockCounter {
 /// cases without giving up a lot of performance
 class OptionalBitBlockCounter {
  public:
-  static constexpr int64_t kMaxBlockSize = std::numeric_limits<int16_t>::max();
-
   OptionalBitBlockCounter(const uint8_t* validity_bitmap, int64_t offset, int64_t length);
 
   OptionalBitBlockCounter(const std::shared_ptr<Buffer>& validity_bitmap, int64_t offset,
@@ -116,6 +114,7 @@ class OptionalBitBlockCounter {
 
   /// Return block count for next word when the bitmap is
   BitBlockCount NextBlock() {
+    static constexpr int64_t kMaxBlockSize = std::numeric_limits<int16_t>::max();
     if (has_bitmap_) {
       BitBlockCount block = counter_.NextWord();
       position_ += block.length;

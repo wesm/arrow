@@ -88,7 +88,7 @@ Status BoundscheckImpl(const ArrayData& indices, IndexCType upper_limit) {
     }
     if (block_out_of_bounds) {
       // TODO: Find the out of bounds index in the block
-      return Status::Invalid("Take indices out of bounds");
+      return Status::IndexError("Take indices out of bounds");
     }
     indices_data += block.length;
     position += block.length;
@@ -144,14 +144,11 @@ struct PrimitiveTakeArgs {
   int64_t indices_length;
   int64_t indices_offset;
   int64_t indices_null_count;
-  uint8_t* out;
-  uint8_t* out_bitmap;
-  int64_t out_offset;
 };
 
 // Reduce code size by dealing with the unboxing of the kernel inputs once
 // rather than duplicating compiled code to do all these in each kernel.
-PrimitiveTakeArgs GetPrimitiveTakeArgs(const ExecBatch& batch, Datum* out) {
+PrimitiveTakeArgs GetPrimitiveTakeArgs(const ExecBatch& batch) {
   PrimitiveTakeArgs args;
 
   const ArrayData& arg0 = *batch[0].array();
@@ -180,15 +177,6 @@ PrimitiveTakeArgs GetPrimitiveTakeArgs(const ExecBatch& batch, Datum* out) {
     args.indices_bitmap = arg1.buffers[0]->data();
   }
 
-  // Output
-  ArrayData* out_arr = out->mutable_array();
-  args.out = out_arr->buffers[1]->mutable_data();
-  if (args.values_bit_width > 1) {
-    args.out += out_arr->offset * args.values_bit_width / 8;
-  }
-  args.out_bitmap = out_arr->buffers[0]->mutable_data();
-  args.out_offset = out_arr->offset;
-
   return args;
 }
 
@@ -199,7 +187,7 @@ PrimitiveTakeArgs GetPrimitiveTakeArgs(const ExecBatch& batch, Datum* out) {
 /// This function assumes that the indices have been boundschecked.
 template <typename IndexCType, typename ValueCType>
 struct PrimitiveTakeImpl {
-  static void Exec(const PrimitiveTakeArgs& args) {
+  static void Exec(const PrimitiveTakeArgs& args, Datum* out_datum) {
     auto values = reinterpret_cast<const ValueCType*>(args.values);
     auto values_bitmap = args.values_bitmap;
     auto values_offset = args.values_offset;
@@ -208,9 +196,10 @@ struct PrimitiveTakeImpl {
     auto indices_bitmap = args.indices_bitmap;
     auto indices_offset = args.indices_offset;
 
-    auto out = reinterpret_cast<ValueCType*>(args.out);
-    auto out_bitmap = args.out_bitmap;
-    auto out_offset = args.out_offset;
+    ArrayData* out_arr = out_datum->mutable_array();
+    auto out = out_arr->GetMutableValues<ValueCType>(1);
+    auto out_bitmap = out_arr->buffers[0]->mutable_data();
+    auto out_offset = out_arr->offset;
 
     // If either the values or indices have nulls, we preemptively zero out the
     // out validity bitmap so that we don't have to use ClearBit in each
@@ -222,6 +211,7 @@ struct PrimitiveTakeImpl {
     OptionalBitBlockCounter indices_bit_counter(indices_bitmap, indices_offset,
                                                 args.indices_length);
     int64_t position = 0;
+    int64_t valid_count = 0;
     while (true) {
       BitBlockCount block = indices_bit_counter.NextBlock();
       if (block.length == 0) {
@@ -230,6 +220,7 @@ struct PrimitiveTakeImpl {
       }
       if (args.values_null_count == 0) {
         // Values are never null, so things are easier
+        valid_count += block.popcount;
         if (block.popcount == block.length) {
           // Fastest path: neither values nor index nulls
           BitUtil::SetBitsTo(out_bitmap, out_offset + position, block.length, true);
@@ -257,6 +248,7 @@ struct PrimitiveTakeImpl {
               // value is not null
               out[position] = values[indices[position]];
               BitUtil::SetBit(out_bitmap, out_offset + position);
+              ++valid_count;
             }
             ++position;
           }
@@ -271,6 +263,7 @@ struct PrimitiveTakeImpl {
                 // value is not null
                 out[position] = values[indices[position]];
                 BitUtil::SetBit(out_bitmap, out_offset + position);
+                ++valid_count;
               }
             }
             ++position;
@@ -278,12 +271,13 @@ struct PrimitiveTakeImpl {
         }
       }
     }
+    out_arr->null_count = out_arr->length - valid_count;
   }
 };
 
 template <typename IndexCType>
 struct BooleanTakeImpl {
-  static void Exec(const PrimitiveTakeArgs& args) {
+  static void Exec(const PrimitiveTakeArgs& args, Datum* out_datum) {
     auto values = args.values;
     auto values_bitmap = args.values_bitmap;
     auto values_offset = args.values_offset;
@@ -292,9 +286,10 @@ struct BooleanTakeImpl {
     auto indices_bitmap = args.indices_bitmap;
     auto indices_offset = args.indices_offset;
 
-    auto out_bitmap = args.out_bitmap;
-    auto out = args.out;
-    auto out_offset = args.out_offset;
+    ArrayData* out_arr = out_datum->mutable_array();
+    auto out = out_arr->buffers[1]->mutable_data();
+    auto out_bitmap = out_arr->buffers[0]->mutable_data();
+    auto out_offset = out_arr->offset;
 
     // If either the values or indices have nulls, we preemptively zero out the
     // out validity bitmap so that we don't have to use ClearBit in each
@@ -311,6 +306,7 @@ struct BooleanTakeImpl {
     OptionalBitBlockCounter indices_bit_counter(indices_bitmap, indices_offset,
                                                 args.indices_length);
     int64_t position = 0;
+    int64_t valid_count = 0;
     while (true) {
       BitBlockCount block = indices_bit_counter.NextBlock();
       if (block.length == 0) {
@@ -319,6 +315,7 @@ struct BooleanTakeImpl {
       }
       if (args.values_null_count == 0) {
         // Values are never null, so things are easier
+        valid_count += block.popcount;
         if (block.popcount == block.length) {
           // Fastest path: neither values nor index nulls
           BitUtil::SetBitsTo(out_bitmap, out_offset + position, block.length, true);
@@ -339,13 +336,14 @@ struct BooleanTakeImpl {
         }
       } else {
         // Values have nulls, so we must do random access into the values bitmap
-        if (block.popcount < block.length) {
+        if (block.popcount == block.length) {
           // Faster path: indices are not null but values may be
           for (int64_t i = 0; i < block.length; ++i) {
             if (BitUtil::GetBit(values_bitmap, values_offset + indices[position])) {
               // value is not null
               BitUtil::SetBit(out_bitmap, out_offset + position);
               PlaceDataBit(position, indices[position]);
+              ++valid_count;
             }
             ++position;
           }
@@ -360,6 +358,7 @@ struct BooleanTakeImpl {
                 // value is not null
                 PlaceDataBit(position, indices[position]);
                 BitUtil::SetBit(out_bitmap, out_offset + position);
+                ++valid_count;
               }
             }
             ++position;
@@ -367,11 +366,12 @@ struct BooleanTakeImpl {
         }
       }
     }
+    out_arr->null_count = out_arr->length - valid_count;
   }
 };
 
 template <template <typename...> class TakeImpl, typename... Args>
-void TakeIndexDispatch(const PrimitiveTakeArgs& args) {
+void TakeIndexDispatch(const PrimitiveTakeArgs& args, Datum* out) {
   // With the simplifying assumption that boundschecking has taken place
   // already at a higher level, we can now assume that the index values are all
   // non-negative. Thus, we can interpret signed integers as unsigned and avoid
@@ -379,17 +379,32 @@ void TakeIndexDispatch(const PrimitiveTakeArgs& args) {
   // with.
   switch (args.indices_bit_width) {
     case 8:
-      return TakeImpl<uint8_t, Args...>::Exec(args);
+      return TakeImpl<uint8_t, Args...>::Exec(args, out);
     case 16:
-      return TakeImpl<uint16_t, Args...>::Exec(args);
+      return TakeImpl<uint16_t, Args...>::Exec(args, out);
     case 32:
-      return TakeImpl<uint32_t, Args...>::Exec(args);
+      return TakeImpl<uint32_t, Args...>::Exec(args, out);
     case 64:
-      return TakeImpl<uint64_t, Args...>::Exec(args);
+      return TakeImpl<uint64_t, Args...>::Exec(args, out);
     default:
       DCHECK(false) << "Invalid indices byte width";
       break;
   }
+}
+
+Status PreallocateTake(KernelContext* ctx, int64_t length, int bit_width, Datum* out) {
+  // Preallocate memory
+  ArrayData* out_arr = out->mutable_array();
+  out_arr->length = length;
+  out_arr->buffers.resize(2);
+
+  ARROW_ASSIGN_OR_RAISE(out_arr->buffers[0], ctx->AllocateBitmap(length));
+  if (bit_width == 1) {
+    ARROW_ASSIGN_OR_RAISE(out_arr->buffers[1], ctx->AllocateBitmap(length));
+  } else {
+    ARROW_ASSIGN_OR_RAISE(out_arr->buffers[1], ctx->Allocate(length * bit_width / 8));
+  }
+  return Status::OK();
 }
 
 static void PrimitiveTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
@@ -397,18 +412,20 @@ static void PrimitiveTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum*
   if (state.options.boundscheck) {
     KERNEL_RETURN_IF_ERROR(ctx, Boundscheck(*batch[1].array(), batch[0].length()));
   }
-  PrimitiveTakeArgs args = GetPrimitiveTakeArgs(batch, out);
+  PrimitiveTakeArgs args = GetPrimitiveTakeArgs(batch);
+  KERNEL_RETURN_IF_ERROR(
+      ctx, PreallocateTake(ctx, args.indices_length, args.values_bit_width, out));
   switch (args.values_bit_width) {
     case 1:
-      return TakeIndexDispatch<BooleanTakeImpl>(args);
+      return TakeIndexDispatch<BooleanTakeImpl>(args, out);
     case 8:
-      return TakeIndexDispatch<PrimitiveTakeImpl, int8_t>(args);
+      return TakeIndexDispatch<PrimitiveTakeImpl, int8_t>(args, out);
     case 16:
-      return TakeIndexDispatch<PrimitiveTakeImpl, int16_t>(args);
+      return TakeIndexDispatch<PrimitiveTakeImpl, int16_t>(args, out);
     case 32:
-      return TakeIndexDispatch<PrimitiveTakeImpl, int32_t>(args);
+      return TakeIndexDispatch<PrimitiveTakeImpl, int32_t>(args, out);
     case 64:
-      return TakeIndexDispatch<PrimitiveTakeImpl, int64_t>(args);
+      return TakeIndexDispatch<PrimitiveTakeImpl, int64_t>(args, out);
     default:
       DCHECK(false) << "Invalid values byte width";
       break;
@@ -416,6 +433,10 @@ static void PrimitiveTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum*
 }
 
 static void NullTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  const auto& state = checked_cast<const TakeState&>(*ctx->state());
+  if (state.options.boundscheck) {
+    KERNEL_RETURN_IF_ERROR(ctx, Boundscheck(*batch[1].array(), batch[0].length()));
+  }
   out->value = std::make_shared<NullArray>(batch.length)->data();
 }
 
@@ -819,20 +840,6 @@ class TakeMetaFunction : public MetaFunction {
 
 static InputType kTakeIndexType(match::Integer(), ValueDescr::ARRAY);
 
-void AddPrimitiveTake(VectorKernel base, VectorFunction* func) {
-  // Single kernel entry point for all primitive types. We dispatch to take
-  // implementations inside the kernel for now. The primitive take
-  // implementation writes into preallocated memory while the other
-  // implementations handle their own memory allocation.
-  base.signature = KernelSignature::Make(
-      {InputType(match::Primitive(), ValueDescr::ARRAY), kTakeIndexType},
-      OutputType(FirstType));
-  base.exec = PrimitiveTakeExec;
-  base.null_handling = NullHandling::COMPUTED_PREALLOCATE;
-  base.mem_allocation = MemAllocation::PREALLOCATE;
-  DCHECK_OK(func->AddKernel(base));
-}
-
 void RegisterVectorTake(FunctionRegistry* registry) {
   VectorKernel base;
   base.init = InitTake;
@@ -840,23 +847,27 @@ void RegisterVectorTake(FunctionRegistry* registry) {
 
   auto array_take = std::make_shared<VectorFunction>("array_take", Arity::Binary());
 
-  AddPrimitiveTake(base, array_take.get());
-
-  auto AddBasicKernel = [&](InputType value_ty, ArrayKernelExec exec) {
+  auto AddTakeKernel = [&](InputType value_ty, ArrayKernelExec exec) {
     base.signature =
         KernelSignature::Make({value_ty, kTakeIndexType}, OutputType(FirstType));
     base.exec = exec;
     DCHECK_OK(array_take->AddKernel(base));
   };
 
-  AddBasicKernel(InputType::Array(null()), NullTakeExec);
-  AddBasicKernel(InputType::Array(Type::EXTENSION), ExtensionTakeExec);
-  AddBasicKernel(InputType::Array(Type::LIST), GenericTakeExec<ListTakeImpl<ListType>>);
-  AddBasicKernel(InputType::Array(Type::LARGE_LIST),
-                 GenericTakeExec<ListTakeImpl<LargeListType>>);
-  AddBasicKernel(InputType::Array(Type::FIXED_SIZE_LIST),
-                 GenericTakeExec<FixedSizeListTakeImpl>);
-  AddBasicKernel(InputType::Array(Type::STRUCT), GenericTakeExec<StructTakeImpl>);
+  // Single kernel entry point for all primitive types. We dispatch to take
+  // implementations inside the kernel for now. The primitive take
+  // implementation writes into preallocated memory while the other
+  // implementations handle their own memory allocation.
+  AddTakeKernel(InputType(match::Primitive(), ValueDescr::ARRAY), PrimitiveTakeExec);
+
+  AddTakeKernel(InputType::Array(null()), NullTakeExec);
+  AddTakeKernel(InputType::Array(Type::EXTENSION), ExtensionTakeExec);
+  AddTakeKernel(InputType::Array(Type::LIST), GenericTakeExec<ListTakeImpl<ListType>>);
+  AddTakeKernel(InputType::Array(Type::LARGE_LIST),
+                GenericTakeExec<ListTakeImpl<LargeListType>>);
+  AddTakeKernel(InputType::Array(Type::FIXED_SIZE_LIST),
+                GenericTakeExec<FixedSizeListTakeImpl>);
+  AddTakeKernel(InputType::Array(Type::STRUCT), GenericTakeExec<StructTakeImpl>);
 
   DCHECK_OK(registry->AddFunction(std::move(array_take)));
 

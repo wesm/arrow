@@ -41,7 +41,7 @@ void AssertTakeArrays(const std::shared_ptr<Array>& values,
                       const std::shared_ptr<Array>& expected) {
   ASSERT_OK_AND_ASSIGN(std::shared_ptr<Array> actual, Take(*values, *indices));
   ASSERT_OK(actual->ValidateFull());
-  AssertArraysEqual(*expected, *actual);
+  AssertArraysEqual(*expected, *actual, /*verbose=*/true);
 }
 
 Status TakeJSON(const std::shared_ptr<DataType>& type, const std::string& values,
@@ -58,7 +58,7 @@ void CheckTake(const std::shared_ptr<DataType>& type, const std::string& values,
   for (auto index_type : {int8(), uint32()}) {
     ASSERT_OK(TakeJSON(type, values, index_type, indices, &actual));
     ASSERT_OK(actual->ValidateFull());
-    AssertArraysEqual(*ArrayFromJSON(type, expected), *actual);
+    AssertArraysEqual(*ArrayFromJSON(type, expected), *actual, /*verbose=*/true);
   }
 }
 

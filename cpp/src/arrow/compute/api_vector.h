@@ -65,9 +65,11 @@ Result<Datum> Filter(const Datum& values, const Datum& filter,
                      ExecContext* ctx = NULLPTR);
 
 struct ARROW_EXPORT TakeOptions : public FunctionOptions {
+  explicit TakeOptions(bool boundscheck = true) : boundscheck(boundscheck) {}
+
   bool boundscheck = true;
-  static TakeOptions Boundscheck() { return TakeOptions{true}; }
-  static TakeOptions NoBoundscheck() { return TakeOptions{false}; }
+  static TakeOptions Boundscheck() { return TakeOptions(true); }
+  static TakeOptions NoBoundscheck() { return TakeOptions(false); }
   static TakeOptions Defaults() { return Boundscheck(); }
 };
 

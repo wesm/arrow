@@ -154,9 +154,7 @@ class IntegerMatcher : public TypeMatcher {
  public:
   IntegerMatcher() {}
 
-  bool Matches(const DataType& type) const override {
-    return is_integer(type.id());
-  }
+  bool Matches(const DataType& type) const override { return is_integer(type.id()); }
 
   bool Equals(const TypeMatcher& other) const override {
     if (this == &other) {
@@ -166,22 +164,16 @@ class IntegerMatcher : public TypeMatcher {
     return casted != nullptr;
   }
 
-  std::string ToString() const override {
-    return "integer";
-  }
+  std::string ToString() const override { return "integer"; }
 };
 
-std::shared_ptr<TypeMatcher> Integer() {
-  return std::make_shared<IntegerMatcher>();
-}
+std::shared_ptr<TypeMatcher> Integer() { return std::make_shared<IntegerMatcher>(); }
 
 class PrimitiveMatcher : public TypeMatcher {
  public:
   PrimitiveMatcher() {}
 
-  bool Matches(const DataType& type) const override {
-    return is_primitive(type.id());
-  }
+  bool Matches(const DataType& type) const override { return is_primitive(type.id()); }
 
   bool Equals(const TypeMatcher& other) const override {
     if (this == &other) {
@@ -191,14 +183,10 @@ class PrimitiveMatcher : public TypeMatcher {
     return casted != nullptr;
   }
 
-  std::string ToString() const override {
-    return "primitive";
-  }
+  std::string ToString() const override { return "primitive"; }
 };
 
-std::shared_ptr<TypeMatcher> Primitive() {
-  return std::make_shared<PrimitiveMatcher>();
-}
+std::shared_ptr<TypeMatcher> Primitive() { return std::make_shared<PrimitiveMatcher>(); }
 
 }  // namespace match
 

@@ -17,9 +17,12 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 
+#include "arrow/array/array_base.h"
 #include "arrow/util/bit_util.h"
 #include "arrow/util/bitmap_ops.h"
 #include "arrow/util/ubsan.h"
@@ -104,10 +107,9 @@ class ARROW_EXPORT BitBlockCounter {
 /// cases without giving up a lot of performance
 class OptionalBitBlockCounter {
  public:
-  static constexpr int16_t kMaxBlockSize = std::numeric_limits<int16_t>::max();
+  static constexpr int64_t kMaxBlockSize = std::numeric_limits<int16_t>::max();
 
-  OptionalBitBlockCounter(const uint8_t* validity_bitmap, int64_t offset,
-                          int64_t length);
+  OptionalBitBlockCounter(const uint8_t* validity_bitmap, int64_t offset, int64_t length);
 
   OptionalBitBlockCounter(const std::shared_ptr<Buffer>& validity_bitmap, int64_t offset,
                           int64_t length);
@@ -115,11 +117,12 @@ class OptionalBitBlockCounter {
   /// Return block count for next word when the bitmap is
   BitBlockCount NextBlock() {
     if (has_bitmap_) {
-      BitBlockCount block = counter.NextWord();
+      BitBlockCount block = counter_.NextWord();
       position_ += block.length;
       return block;
     } else {
-      int16_t block_size = std::min(kMaxBlockSize, length_ - position_);
+      int16_t block_size =
+          static_cast<int16_t>(std::min(kMaxBlockSize, length_ - position_));
       position_ += block_size;
       // All values are non-null
       return {block_size, block_size};

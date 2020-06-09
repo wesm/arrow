@@ -39,6 +39,7 @@ using internal::BitmapReader;
 using internal::GetArrayView;
 using internal::IndexBoundscheck;
 using internal::OptionalBitBlockCounter;
+using internal::OptionalBitIndexer;
 
 namespace compute {
 namespace internal {
@@ -466,7 +467,6 @@ struct GenericTakeImpl {
           ++position;
         }
       }
-      position += block.length;
     }
     return Status::OK();
   }
@@ -599,7 +599,7 @@ struct FSBTakeImpl : public GenericTakeImpl<FSBTakeImpl, FixedSizeBinaryType> {
     FixedSizeBinaryArray typed_values(this->values);
     int32_t value_size = typed_values.byte_width();
 
-    RETURN_NOT_OK(data_builder.Reserve(value_size + indices->length));
+    RETURN_NOT_OK(data_builder.Reserve(value_size * indices->length));
     RETURN_NOT_OK(this->template VisitIndices<IndexCType>(
         *indices,
         [&](IndexCType index) {
@@ -953,6 +953,7 @@ void RegisterVectorTake(FunctionRegistry* registry) {
   AddTakeKernel(InputType::Array(Type::FIXED_SIZE_BINARY), GenericTakeExec<FSBTakeImpl>);
 
   AddTakeKernel(InputType::Array(null()), NullTakeExec);
+  AddTakeKernel(InputType::Array(Type::DECIMAL), GenericTakeExec<FSBTakeImpl>);
   AddTakeKernel(InputType::Array(Type::DICTIONARY), DictionaryTakeExec);
   AddTakeKernel(InputType::Array(Type::EXTENSION), ExtensionTakeExec);
   AddTakeKernel(InputType::Array(Type::LIST), GenericTakeExec<ListTakeImpl<ListType>>);

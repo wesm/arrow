@@ -497,6 +497,30 @@ struct GenericTakeImpl {
     return validity_builder.Finish(&out->buffers[0]);
   }
 
+  template <typename IndexCType, typename ValidVisitor, typename NullVisitor>
+  Status VisitIndices(const ArrayData& indices, ValidVisitor&& visit_valid,
+                      NullVisitor&& visit_null) {
+    const auto indices_values = indices.GetValues<IndexCType>(1);
+    if (indices.GetNullCount() > 0) {
+      BitmapReader indices_bit_reader(indices.buffers[0]->data(), indices.offset,
+                                      indices.length);
+      for (int64_t i = 0; i < indices.length; ++i) {
+        if (indices_bit_reader.IsNotSet()) {
+          validity_builder.UnsafeAppend(false);
+          RETURN_NOT_OK(visit_null());
+        } else {
+          RETURN_NOT_OK(visit_valid(indices_values[i]));
+        }
+        indices_bit_reader.Next();
+      }
+    } else {
+      for (int64_t i = 0; i < indices.length; ++i) {
+        RETURN_NOT_OK(visit_valid(indices_values[i]));
+      }
+    }
+    return Status::OK();
+  }
+
   virtual Status Init() { return Status::OK(); }
 
   // Implementation specific finish logic
@@ -509,16 +533,16 @@ struct GenericTakeImpl {
         static_cast<const FixedWidthType&>(*this->indices->type).bit_width() / 8;
     switch (index_width) {
       case 1:
-        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<UInt8Type>());
+        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<uint8_t>());
         break;
       case 2:
-        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<UInt16Type>());
+        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<uint16_t>());
         break;
       case 4:
-        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<UInt32Type>());
+        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<uint32_t>());
         break;
       case 8:
-        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<UInt64Type>());
+        RETURN_NOT_OK(static_cast<Impl*>(this)->template ProcessIndices<uint64_t>());
         break;
       default:
         DCHECK(false) << "Invalid index width";
@@ -536,6 +560,8 @@ struct GenericTakeImpl {
   using Base::indices;                                    \
   using Base::out;                                        \
   using Base::validity_builder
+
+static inline Status VisitNoop() { return Status::OK(); }
 
 // A take implementation for 32-bit and 64-bit variable binary types. Common
 // generated kernels are shared between Binary/String and
@@ -559,11 +585,9 @@ struct VarBinaryTakeImpl : public GenericTakeImpl<VarBinaryTakeImpl<Type>, Type>
         offset_builder(ctx->memory_pool()),
         data_builder(ctx->memory_pool()) {}
 
-  template <typename IndexType>
+  template <typename IndexCType>
   Status ProcessIndices() {
-    using IndexArrayType = typename TypeTraits<IndexType>::ArrayType;
     ValuesArrayType typed_values(this->values_as_binary);
-    IndexArrayType typed_indices(this->indices);
 
     // Allocate at least 32K at a time to avoid having to call Reserve for
     // every value for lots of small strings
@@ -572,30 +596,35 @@ struct VarBinaryTakeImpl : public GenericTakeImpl<VarBinaryTakeImpl<Type>, Type>
     int64_t space_available = data_builder.capacity();
 
     offset_type offset = 0;
-    for (int64_t i = 0; i < typed_indices.length(); ++i) {
+    auto PushValidIndex = [&](IndexCType index) {
       offset_builder.UnsafeAppend(offset);
-
-      if (typed_indices.IsNull(i) || typed_values.IsNull(typed_indices.Value(i))) {
+      if (typed_values.IsNull(index)) {
         this->validity_builder.UnsafeAppend(false);
       } else {
         this->validity_builder.UnsafeAppend(true);
-        auto val = typed_values.GetView(typed_indices.Value(i));
+        auto val = typed_values.GetView(index);
         offset_type value_size = static_cast<offset_type>(val.size());
         if (ARROW_PREDICT_FALSE(static_cast<int64_t>(offset) +
                                 static_cast<int64_t>(value_size)) > kOffsetLimit) {
           return Status::Invalid("Take operation overflowed binary array capacity");
         }
         offset += value_size;
-
         if (ARROW_PREDICT_FALSE(value_size > space_available)) {
           RETURN_NOT_OK(data_builder.Reserve(value_size + kAllocateChunksize));
           space_available = data_builder.capacity();
         }
-
         data_builder.UnsafeAppend(reinterpret_cast<const uint8_t*>(val.data()),
                                   value_size);
       }
-    }
+      return Status::OK();
+    };
+
+    auto PushNullIndex = [&]() {
+      offset_builder.UnsafeAppend(offset);
+      return Status::OK();
+    };
+    RETURN_NOT_OK(this->template VisitIndices<IndexCType>(
+        *indices, std::move(PushValidIndex), std::move(PushNullIndex)));
     offset_builder.UnsafeAppend(offset);
     return Status::OK();
   }
@@ -627,21 +656,17 @@ struct ListTakeImpl : public GenericTakeImpl<ListTakeImpl<Type>, Type> {
         offset_builder(ctx->memory_pool()),
         child_index_builder(ctx->memory_pool()) {}
 
-  template <typename IndexType>
+  template <typename IndexCType>
   Status ProcessIndices() {
-    using IndexArrayType = typename TypeTraits<IndexType>::ArrayType;
-    using IndexCType = typename IndexType::c_type;
     ValuesArrayType typed_values(this->values);
-    IndexArrayType typed_indices(this->indices);
 
     offset_type offset = 0;
-    for (int64_t i = 0; i < typed_indices.length(); ++i) {
+    auto PushValidIndex = [&](IndexCType index) {
       offset_builder.UnsafeAppend(offset);
-      if (typed_indices.IsNull(i) || typed_values.IsNull(typed_indices.Value(i))) {
+      if (typed_values.IsNull(index)) {
         this->validity_builder.UnsafeAppend(false);
       } else {
         this->validity_builder.UnsafeAppend(true);
-        IndexCType index = typed_indices.Value(i);
         offset_type value_offset = typed_values.value_offset(index);
         offset_type value_length = typed_values.value_length(index);
         offset += value_length;
@@ -650,7 +675,16 @@ struct ListTakeImpl : public GenericTakeImpl<ListTakeImpl<Type>, Type> {
           child_index_builder.UnsafeAppend(j);
         }
       }
-    }
+      return Status::OK();
+    };
+
+    auto PushNullIndex = [&]() {
+      offset_builder.UnsafeAppend(offset);
+      return Status::OK();
+    };
+
+    RETURN_NOT_OK(this->template VisitIndices<IndexCType>(
+        *indices, std::move(PushValidIndex), std::move(PushNullIndex)));
     offset_builder.UnsafeAppend(offset);
     return Status::OK();
   }
@@ -685,30 +719,30 @@ struct FSLTakeImpl : public GenericTakeImpl<FSLTakeImpl, FixedSizeListType> {
   FSLTakeImpl(KernelContext* ctx, const ExecBatch& batch, Datum* out)
       : Base(ctx, batch, out), child_index_builder(ctx->memory_pool()) {}
 
-  template <typename IndexType>
+  template <typename IndexCType>
   Status ProcessIndices() {
-    using IndexArrayType = typename TypeTraits<IndexType>::ArrayType;
     ValuesArrayType typed_values(this->values);
-    IndexArrayType typed_indices(this->indices);
-
     int32_t list_size = typed_values.list_type()->list_size();
 
     /// We must take list_size elements even for null elements of
-    /// typed_indices.
-    RETURN_NOT_OK(child_index_builder.Reserve(typed_indices.length() * list_size));
-    for (int64_t i = 0; i < typed_indices.length(); ++i) {
-      if (typed_indices.IsNull(i) || typed_values.IsNull(typed_indices.Value(i))) {
-        this->validity_builder.UnsafeAppend(false);
-        RETURN_NOT_OK(child_index_builder.AppendNulls(list_size));
-      } else {
-        this->validity_builder.UnsafeAppend(true);
-        int64_t offset = typed_indices.Value(i) * list_size;
-        for (int64_t j = offset; j < offset + list_size; ++j) {
-          child_index_builder.UnsafeAppend(j);
-        }
-      }
-    }
-    return Status::OK();
+    /// indices.
+    RETURN_NOT_OK(child_index_builder.Reserve(indices->length * list_size));
+    return this->template VisitIndices<IndexCType>(
+        *indices,
+        [&](IndexCType index) {
+          if (typed_values.IsNull(index)) {
+            this->validity_builder.UnsafeAppend(false);
+            return child_index_builder.AppendNulls(list_size);
+          } else {
+            this->validity_builder.UnsafeAppend(true);
+            int64_t offset = index * list_size;
+            for (int64_t j = offset; j < offset + list_size; ++j) {
+              child_index_builder.UnsafeAppend(j);
+            }
+            return Status::OK();
+          }
+        },
+        [&]() { return child_index_builder.AppendNulls(list_size); });
   }
 
   Status Finish() override {
@@ -733,25 +767,16 @@ struct StructTakeImpl : public GenericTakeImpl<StructTakeImpl, StructType> {
   StructTakeImpl(KernelContext* ctx, const ExecBatch& batch, Datum* out)
       : Base(ctx, batch, out) {}
 
-  template <typename IndexType>
+  template <typename IndexCType>
   Status ProcessIndices() {
-    using IndexArrayType = typename TypeTraits<IndexType>::ArrayType;
     StructArray typed_values(values);
-    IndexArrayType typed_indices(indices);
-    if (indices->GetNullCount() > 0) {
-      BitmapReader indices_bit_reader(indices->buffers[0]->data(), indices->offset,
-                                      indices->length);
-      for (int64_t i = 0; i < indices->length; ++i) {
-        validity_builder.UnsafeAppend(indices_bit_reader.IsSet() &&
-                                      typed_values.IsValid(typed_indices.Value(i)));
-        indices_bit_reader.Next();
-      }
-    } else {
-      for (int64_t i = 0; i < indices->length; ++i) {
-        validity_builder.UnsafeAppend(typed_values.IsValid(typed_indices.Value(i)));
-      }
-    }
-    return Status::OK();
+    return this->template VisitIndices<IndexCType>(
+        *indices,
+        [&](IndexCType index) {
+          this->validity_builder.UnsafeAppend(typed_values.IsValid(index));
+          return Status::OK();
+        },
+        /*visit_null=*/VisitNoop);
   }
 
   Status Finish() override {

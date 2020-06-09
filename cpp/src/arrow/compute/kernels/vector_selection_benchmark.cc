@@ -90,7 +90,7 @@ struct TakeBenchmark {
         args(state),
         rand(kSeed),
         indices_have_nulls(indices_have_nulls),
-        monotonic_indices(false) {}
+        monotonic_indices(monotonic_indices) {}
 
   void Int64() {
     const int64_t array_size = args.size / sizeof(int64_t);
@@ -125,8 +125,8 @@ struct TakeBenchmark {
   void Bench(const std::shared_ptr<Array>& values) {
     double indices_null_proportion = indices_have_nulls ? args.null_proportion : 0;
     auto indices =
-        rand.Int32(static_cast<int32_t>(values->length()), 0,
-                   static_cast<int32_t>(values->length() - 1), indices_null_proportion);
+        rand.Int32(values->length(), 0, static_cast<int32_t>(values->length() - 1),
+                   indices_null_proportion);
 
     if (monotonic_indices) {
       auto arg_sorter = *SortToIndices(*indices);

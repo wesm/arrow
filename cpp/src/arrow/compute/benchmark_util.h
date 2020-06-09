@@ -77,12 +77,18 @@ struct RegressionArgs {
   const int64_t size;
 
   // proportion of nulls in generated arrays
-  const double null_proportion;
+  double null_proportion;
 
   explicit RegressionArgs(benchmark::State& state)
       : size(state.range(0)),
-        null_proportion(std::min(1., 1. / static_cast<double>(state.range(1)))),
-        state_(state) {}
+        null_proportion(),
+        state_(state) {
+    if (state.range(1) == 0) {
+      this->null_proportion = 0.0;
+    } else {
+      this->null_proportion = std::min(1., 1. / static_cast<double>(state.range(1)));
+    }
+  }
 
   ~RegressionArgs() {
     state_.counters["size"] = static_cast<double>(size);

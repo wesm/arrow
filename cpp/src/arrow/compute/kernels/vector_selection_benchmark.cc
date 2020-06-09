@@ -123,7 +123,7 @@ struct TakeBenchmark {
   }
 
   void Bench(const std::shared_ptr<Array>& values) {
-    bool indices_null_proportion = indices_have_nulls ? args.null_proportion : 0;
+    double indices_null_proportion = indices_have_nulls ? args.null_proportion : 0;
     auto indices =
         rand.Int32(static_cast<int32_t>(values->length()), 0,
                    static_cast<int32_t>(values->length() - 1), indices_null_proportion);
@@ -277,12 +277,12 @@ void TakeSetArgs(benchmark::internal::Benchmark* bench) {
 
 BENCHMARK(TakeInt64RandomIndicesNoNulls)->Apply(TakeSetArgs);
 BENCHMARK(TakeInt64RandomIndicesWithNulls)->Apply(TakeSetArgs);
+BENCHMARK(TakeInt64MonotonicIndices)->Apply(TakeSetArgs);
 BENCHMARK(TakeFSLInt64RandomIndicesNoNulls)->Apply(TakeSetArgs);
 BENCHMARK(TakeFSLInt64RandomIndicesWithNulls)->Apply(TakeSetArgs);
+BENCHMARK(TakeFSLInt64MonotonicIndices)->Apply(TakeSetArgs);
 BENCHMARK(TakeStringRandomIndicesNoNulls)->Apply(TakeSetArgs);
 BENCHMARK(TakeStringRandomIndicesWithNulls)->Apply(TakeSetArgs);
-BENCHMARK(TakeInt64MonotonicIndices)->Apply(TakeSetArgs);
-BENCHMARK(TakeFSLInt64MonotonicIndices)->Apply(TakeSetArgs);
 BENCHMARK(TakeStringMonotonicIndices)->Apply(TakeSetArgs);
 
 }  // namespace compute

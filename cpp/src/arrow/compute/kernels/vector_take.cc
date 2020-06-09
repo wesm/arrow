@@ -596,35 +596,35 @@ struct VarBinaryTakeImpl : public GenericTakeImpl<VarBinaryTakeImpl<Type>, Type>
     int64_t space_available = data_builder.capacity();
 
     offset_type offset = 0;
-    auto PushValidIndex = [&](IndexCType index) {
-      offset_builder.UnsafeAppend(offset);
-      if (typed_values.IsNull(index)) {
-        this->validity_builder.UnsafeAppend(false);
-      } else {
-        this->validity_builder.UnsafeAppend(true);
-        auto val = typed_values.GetView(index);
-        offset_type value_size = static_cast<offset_type>(val.size());
-        if (ARROW_PREDICT_FALSE(static_cast<int64_t>(offset) +
-                                static_cast<int64_t>(value_size)) > kOffsetLimit) {
-          return Status::Invalid("Take operation overflowed binary array capacity");
-        }
-        offset += value_size;
-        if (ARROW_PREDICT_FALSE(value_size > space_available)) {
-          RETURN_NOT_OK(data_builder.Reserve(value_size + kAllocateChunksize));
-          space_available = data_builder.capacity();
-        }
-        data_builder.UnsafeAppend(reinterpret_cast<const uint8_t*>(val.data()),
-                                  value_size);
-      }
-      return Status::OK();
-    };
-
-    auto PushNullIndex = [&]() {
-      offset_builder.UnsafeAppend(offset);
-      return Status::OK();
-    };
     RETURN_NOT_OK(this->template VisitIndices<IndexCType>(
-        *indices, std::move(PushValidIndex), std::move(PushNullIndex)));
+        *indices,
+        [&](IndexCType index) {
+          offset_builder.UnsafeAppend(offset);
+          if (typed_values.IsNull(index)) {
+            this->validity_builder.UnsafeAppend(false);
+          } else {
+            this->validity_builder.UnsafeAppend(true);
+            auto val = typed_values.GetView(index);
+            offset_type value_size = static_cast<offset_type>(val.size());
+            if (ARROW_PREDICT_FALSE(static_cast<int64_t>(offset) +
+                                    static_cast<int64_t>(value_size)) > kOffsetLimit) {
+              return Status::Invalid("Take operation overflowed binary array capacity");
+            }
+            offset += value_size;
+            if (ARROW_PREDICT_FALSE(value_size > space_available)) {
+              RETURN_NOT_OK(data_builder.Reserve(value_size + kAllocateChunksize));
+              space_available = data_builder.capacity() - data_builder.length();
+            }
+            data_builder.UnsafeAppend(reinterpret_cast<const uint8_t*>(val.data()),
+                                      value_size);
+            space_available -= value_size;
+          }
+          return Status::OK();
+        },
+        [&]() {
+          offset_builder.UnsafeAppend(offset);
+          return Status::OK();
+        }));
     offset_builder.UnsafeAppend(offset);
     return Status::OK();
   }

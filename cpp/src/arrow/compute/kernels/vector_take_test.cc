@@ -179,6 +179,7 @@ class TestTakeKernelWithString : public TestTakeKernel<TypeClass> {
                   const std::string& expected) {
     CheckTake(value_type(), values, indices, expected);
   }
+
   void AssertTakeDictionary(const std::string& dictionary_values,
                             const std::string& dictionary_indices,
                             const std::string& indices,
@@ -216,6 +217,29 @@ TYPED_TEST(TestTakeKernelWithString, TakeDictionary) {
   this->AssertTakeDictionary(dict, "[3, 4, 2]", "[0, 1, 0]", "[3, 4, 3]");
   this->AssertTakeDictionary(dict, "[null, 4, 2]", "[0, 1, 0]", "[null, 4, null]");
   this->AssertTakeDictionary(dict, "[3, 4, 2]", "[null, 1, 0]", "[null, 4, 3]");
+}
+
+class TestTakeKernelFSB : public TestTakeKernel<FixedSizeBinaryType> {
+ public:
+  std::shared_ptr<DataType> value_type() { return fixed_size_binary(3); }
+
+  void AssertTake(const std::string& values, const std::string& indices,
+                  const std::string& expected) {
+    CheckTake(value_type(), values, indices, expected);
+  }
+};
+
+TEST_F(TestTakeKernelFSB, TakeFixedSizeBinary) {
+  this->AssertTake(R"(["aaa", "bbb", "ccc"])", "[0, 1, 0]", R"(["aaa", "bbb", "aaa"])");
+  this->AssertTake(R"([null, "bbb", "ccc"])", "[0, 1, 0]", "[null, \"bbb\", null]");
+  this->AssertTake(R"(["aaa", "bbb", "ccc"])", "[null, 1, 0]", R"([null, "bbb", "aaa"])");
+
+  std::shared_ptr<DataType> type = this->value_type();
+  std::shared_ptr<Array> arr;
+  ASSERT_RAISES(IndexError,
+                TakeJSON(type, R"(["aaa", "bbb", "ccc"])", int8(), "[0, 9, 0]", &arr));
+  ASSERT_RAISES(IndexError, TakeJSON(type, R"(["aaa", "bbb", null, "ddd", "eee"])",
+                                     int64(), "[2, 5]", &arr));
 }
 
 class TestTakeKernelWithList : public TestTakeKernel<ListType> {};

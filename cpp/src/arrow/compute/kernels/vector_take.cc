@@ -30,12 +30,14 @@
 #include "arrow/result.h"
 #include "arrow/util/bit_block_counter.h"
 #include "arrow/util/bitmap_reader.h"
+#include "arrow/util/int_util.h"
 
 namespace arrow {
 
 using internal::BitBlockCount;
 using internal::BitmapReader;
 using internal::GetArrayView;
+using internal::IndexBoundscheck;
 using internal::OptionalBitBlockCounter;
 
 namespace compute {
@@ -52,79 +54,7 @@ std::unique_ptr<KernelState> InitTake(KernelContext*, const KernelInitArgs& args
   return std::unique_ptr<KernelState>(new TakeState{*take_options});
 }
 
-namespace {
-
-template <typename IndexCType, bool IsSigned = std::is_signed<IndexCType>::value>
-Status BoundscheckImpl(const ArrayData& indices, IndexCType upper_limit) {
-  // For unsigned integers, if the values array is larger than the maximum
-  // index value (e.g. especially for UINT8 / UINT16), then there is no need to
-  // boundscheck.
-  if (!IsSigned && upper_limit >= std::numeric_limits<IndexCType>::max()) {
-    return Status::OK();
-  }
-
-  const IndexCType* indices_data = indices.GetValues<IndexCType>(1);
-  const uint8_t* bitmap = nullptr;
-  if (indices.buffers[0]) {
-    bitmap = indices.buffers[0]->data();
-  }
-  OptionalBitBlockCounter indices_bit_counter(bitmap, indices.offset, indices.length);
-  int64_t position = 0;
-  while (position < indices.length) {
-    BitBlockCount block = indices_bit_counter.NextBlock();
-    bool block_out_of_bounds = false;
-    if (block.popcount == block.length) {
-      // Fast path: branchless
-      for (int64_t i = 0; i < block.length; ++i) {
-        block_out_of_bounds |=
-            ((IsSigned && indices_data[i] < 0) || indices_data[i] >= upper_limit);
-      }
-    } else if (block.popcount > 0) {
-      // Indices have nulls, must only boundscheck non-null values
-      for (int64_t i = 0; i < block.length; ++i) {
-        if (BitUtil::GetBit(bitmap, indices.offset + position + i)) {
-          block_out_of_bounds |=
-              ((IsSigned && indices_data[i] < 0) || indices_data[i] >= upper_limit);
-        }
-      }
-    }
-    if (block_out_of_bounds) {
-      // TODO: Find the out of bounds index in the block
-      return Status::IndexError("Take indices out of bounds");
-    }
-    indices_data += block.length;
-    position += block.length;
-  }
-  return Status::OK();
-}
-
-/// \brief Branchless boundschecking of the indices. Processes batches of
-/// indices at a time and shortcircuits when encountering an out-of-bounds
-/// index in a batch
-Status Boundscheck(const ArrayData& indices, int64_t upper_limit) {
-  switch (indices.type->id()) {
-    case Type::INT8:
-      return BoundscheckImpl<int8_t>(indices, upper_limit);
-    case Type::INT16:
-      return BoundscheckImpl<int16_t>(indices, upper_limit);
-    case Type::INT32:
-      return BoundscheckImpl<int32_t>(indices, upper_limit);
-    case Type::INT64:
-      return BoundscheckImpl<int64_t>(indices, upper_limit);
-    case Type::UINT8:
-      return BoundscheckImpl<uint8_t>(indices, upper_limit);
-    case Type::UINT16:
-      return BoundscheckImpl<uint16_t>(indices, upper_limit);
-    case Type::UINT32:
-      return BoundscheckImpl<uint32_t>(indices, upper_limit);
-    case Type::UINT64:
-      return BoundscheckImpl<uint64_t>(indices, upper_limit);
-    default:
-      return Status::Invalid("Invalid index type for boundschecking");
-  }
-}
-
-}  // namespace
+namespace {}  // namespace
 
 // ----------------------------------------------------------------------
 // Implement optimized take for primitive types from boolean to 1/2/4/8-byte
@@ -378,7 +308,7 @@ void TakeIndexDispatch(const PrimitiveTakeArgs& args, Datum* out) {
   // already at a higher level, we can now assume that the index values are all
   // non-negative. Thus, we can interpret signed integers as unsigned and avoid
   // having to generate double the amount of binary code to handle each integer
-  // with.
+  // width.
   switch (args.indices_bit_width) {
     case 8:
       return TakeImpl<uint8_t, Args...>::Exec(args, out);
@@ -412,7 +342,7 @@ Status PreallocateTake(KernelContext* ctx, int64_t length, int bit_width, Datum*
 static void PrimitiveTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
   const auto& state = checked_cast<const TakeState&>(*ctx->state());
   if (state.options.boundscheck) {
-    KERNEL_RETURN_IF_ERROR(ctx, Boundscheck(*batch[1].array(), batch[0].length()));
+    KERNEL_RETURN_IF_ERROR(ctx, IndexBoundscheck(*batch[1].array(), batch[0].length()));
   }
   PrimitiveTakeArgs args = GetPrimitiveTakeArgs(batch);
   KERNEL_RETURN_IF_ERROR(
@@ -437,7 +367,7 @@ static void PrimitiveTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum*
 static void NullTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
   const auto& state = checked_cast<const TakeState&>(*ctx->state());
   if (state.options.boundscheck) {
-    KERNEL_RETURN_IF_ERROR(ctx, Boundscheck(*batch[1].array(), batch[0].length()));
+    KERNEL_RETURN_IF_ERROR(ctx, IndexBoundscheck(*batch[1].array(), batch[0].length()));
   }
   out->value = std::make_shared<NullArray>(batch.length)->data();
 }
@@ -501,22 +431,42 @@ struct GenericTakeImpl {
   Status VisitIndices(const ArrayData& indices, ValidVisitor&& visit_valid,
                       NullVisitor&& visit_null) {
     const auto indices_values = indices.GetValues<IndexCType>(1);
-    if (indices.GetNullCount() > 0) {
-      BitmapReader indices_bit_reader(indices.buffers[0]->data(), indices.offset,
-                                      indices.length);
-      for (int64_t i = 0; i < indices.length; ++i) {
-        if (indices_bit_reader.IsNotSet()) {
-          validity_builder.UnsafeAppend(false);
-          RETURN_NOT_OK(visit_null());
-        } else {
-          RETURN_NOT_OK(visit_valid(indices_values[i]));
+    const uint8_t* bitmap = nullptr;
+    if (indices.buffers[0]) {
+      bitmap = indices.buffers[0]->data();
+    }
+    OptionalBitIndexer values_is_valid(values->buffers[0], values->offset);
+
+    OptionalBitBlockCounter bit_counter(bitmap, indices.offset, indices.length);
+    int64_t position = 0;
+    while (position < indices.length) {
+      BitBlockCount block = bit_counter.NextBlock();
+      if (block.popcount == block.length) {
+        // Fast path, no null indices
+        for (int64_t i = 0; i < block.length; ++i) {
+          if (values_is_valid[indices_values[position]]) {
+            validity_builder.UnsafeAppend(true);
+            RETURN_NOT_OK(visit_valid(indices_values[position]));
+          } else {
+            validity_builder.UnsafeAppend(false);
+            RETURN_NOT_OK(visit_null());
+          }
+          ++position;
         }
-        indices_bit_reader.Next();
+      } else {
+        for (int64_t i = 0; i < block.length; ++i) {
+          if (BitUtil::GetBit(bitmap, indices.offset + position) &&
+              values_is_valid[indices_values[position]]) {
+            validity_builder.UnsafeAppend(true);
+            RETURN_NOT_OK(visit_valid(indices_values[position]));
+          } else {
+            validity_builder.UnsafeAppend(false);
+            RETURN_NOT_OK(visit_null());
+          }
+          ++position;
+        }
       }
-    } else {
-      for (int64_t i = 0; i < indices.length; ++i) {
-        RETURN_NOT_OK(visit_valid(indices_values[i]));
-      }
+      position += block.length;
     }
     return Status::OK();
   }
@@ -568,7 +518,6 @@ static inline Status VisitNoop() { return Status::OK(); }
 // LargeBinary/LargeString
 template <typename Type>
 struct VarBinaryTakeImpl : public GenericTakeImpl<VarBinaryTakeImpl<Type>, Type> {
-  using BuilderType = typename TypeTraits<Type>::ArrayType;
   using offset_type = typename Type::offset_type;
 
   using Base = GenericTakeImpl<VarBinaryTakeImpl<Type>, Type>;
@@ -600,25 +549,20 @@ struct VarBinaryTakeImpl : public GenericTakeImpl<VarBinaryTakeImpl<Type>, Type>
         *indices,
         [&](IndexCType index) {
           offset_builder.UnsafeAppend(offset);
-          if (typed_values.IsNull(index)) {
-            this->validity_builder.UnsafeAppend(false);
-          } else {
-            this->validity_builder.UnsafeAppend(true);
-            auto val = typed_values.GetView(index);
-            offset_type value_size = static_cast<offset_type>(val.size());
-            if (ARROW_PREDICT_FALSE(static_cast<int64_t>(offset) +
-                                    static_cast<int64_t>(value_size)) > kOffsetLimit) {
-              return Status::Invalid("Take operation overflowed binary array capacity");
-            }
-            offset += value_size;
-            if (ARROW_PREDICT_FALSE(value_size > space_available)) {
-              RETURN_NOT_OK(data_builder.Reserve(value_size + kAllocateChunksize));
-              space_available = data_builder.capacity() - data_builder.length();
-            }
-            data_builder.UnsafeAppend(reinterpret_cast<const uint8_t*>(val.data()),
-                                      value_size);
-            space_available -= value_size;
+          auto val = typed_values.GetView(index);
+          offset_type value_size = static_cast<offset_type>(val.size());
+          if (ARROW_PREDICT_FALSE(static_cast<int64_t>(offset) +
+                                  static_cast<int64_t>(value_size)) > kOffsetLimit) {
+            return Status::Invalid("Take operation overflowed binary array capacity");
           }
+          offset += value_size;
+          if (ARROW_PREDICT_FALSE(value_size > space_available)) {
+            RETURN_NOT_OK(data_builder.Reserve(value_size + kAllocateChunksize));
+            space_available = data_builder.capacity() - data_builder.length();
+          }
+          data_builder.UnsafeAppend(reinterpret_cast<const uint8_t*>(val.data()),
+                                    value_size);
+          space_available -= value_size;
           return Status::OK();
         },
         [&]() {
@@ -639,6 +583,39 @@ struct VarBinaryTakeImpl : public GenericTakeImpl<VarBinaryTakeImpl<Type>, Type>
     RETURN_NOT_OK(offset_builder.Finish(&out->buffers[1]));
     return data_builder.Finish(&out->buffers[2]);
   }
+};
+
+struct FSBTakeImpl : public GenericTakeImpl<FSBTakeImpl, FixedSizeBinaryType> {
+  using Base = GenericTakeImpl<FSBTakeImpl, FixedSizeBinaryType>;
+  LIFT_BASE_MEMBERS();
+
+  TypedBufferBuilder<uint8_t> data_builder;
+
+  FSBTakeImpl(KernelContext* ctx, const ExecBatch& batch, Datum* out)
+      : Base(ctx, batch, out), data_builder(ctx->memory_pool()) {}
+
+  template <typename IndexCType>
+  Status ProcessIndices() {
+    FixedSizeBinaryArray typed_values(this->values);
+    int32_t value_size = typed_values.byte_width();
+
+    RETURN_NOT_OK(data_builder.Reserve(value_size + indices->length));
+    RETURN_NOT_OK(this->template VisitIndices<IndexCType>(
+        *indices,
+        [&](IndexCType index) {
+          auto val = typed_values.GetView(index);
+          data_builder.UnsafeAppend(reinterpret_cast<const uint8_t*>(val.data()),
+                                    value_size);
+          return Status::OK();
+        },
+        [&]() {
+          data_builder.UnsafeAppend(value_size, static_cast<uint8_t>(0x00));
+          return Status::OK();
+        }));
+    return Status::OK();
+  }
+
+  Status Finish() override { return data_builder.Finish(&out->buffers[1]); }
 };
 
 template <typename Type>
@@ -663,17 +640,12 @@ struct ListTakeImpl : public GenericTakeImpl<ListTakeImpl<Type>, Type> {
     offset_type offset = 0;
     auto PushValidIndex = [&](IndexCType index) {
       offset_builder.UnsafeAppend(offset);
-      if (typed_values.IsNull(index)) {
-        this->validity_builder.UnsafeAppend(false);
-      } else {
-        this->validity_builder.UnsafeAppend(true);
-        offset_type value_offset = typed_values.value_offset(index);
-        offset_type value_length = typed_values.value_length(index);
-        offset += value_length;
-        RETURN_NOT_OK(child_index_builder.Reserve(value_length));
-        for (offset_type j = value_offset; j < value_offset + value_length; ++j) {
-          child_index_builder.UnsafeAppend(j);
-        }
+      offset_type value_offset = typed_values.value_offset(index);
+      offset_type value_length = typed_values.value_length(index);
+      offset += value_length;
+      RETURN_NOT_OK(child_index_builder.Reserve(value_length));
+      for (offset_type j = value_offset; j < value_offset + value_length; ++j) {
+        child_index_builder.UnsafeAppend(j);
       }
       return Status::OK();
     };
@@ -730,17 +702,11 @@ struct FSLTakeImpl : public GenericTakeImpl<FSLTakeImpl, FixedSizeListType> {
     return this->template VisitIndices<IndexCType>(
         *indices,
         [&](IndexCType index) {
-          if (typed_values.IsNull(index)) {
-            this->validity_builder.UnsafeAppend(false);
-            return child_index_builder.AppendNulls(list_size);
-          } else {
-            this->validity_builder.UnsafeAppend(true);
-            int64_t offset = index * list_size;
-            for (int64_t j = offset; j < offset + list_size; ++j) {
-              child_index_builder.UnsafeAppend(j);
-            }
-            return Status::OK();
+          int64_t offset = index * list_size;
+          for (int64_t j = offset; j < offset + list_size; ++j) {
+            child_index_builder.UnsafeAppend(j);
           }
+          return Status::OK();
         },
         [&]() { return child_index_builder.AppendNulls(list_size); });
   }
@@ -771,11 +737,7 @@ struct StructTakeImpl : public GenericTakeImpl<StructTakeImpl, StructType> {
   Status ProcessIndices() {
     StructArray typed_values(values);
     return this->template VisitIndices<IndexCType>(
-        *indices,
-        [&](IndexCType index) {
-          this->validity_builder.UnsafeAppend(typed_values.IsValid(index));
-          return Status::OK();
-        },
+        *indices, [&](IndexCType index) { return Status::OK(); },
         /*visit_null=*/VisitNoop);
   }
 
@@ -798,7 +760,7 @@ template <typename Impl>
 static void GenericTakeExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
   const auto& state = checked_cast<const TakeState&>(*ctx->state());
   if (state.options.boundscheck) {
-    KERNEL_RETURN_IF_ERROR(ctx, Boundscheck(*batch[1].array(), batch[0].length()));
+    KERNEL_RETURN_IF_ERROR(ctx, IndexBoundscheck(*batch[1].array(), batch[0].length()));
   }
   Impl kernel(ctx, batch, out);
   KERNEL_RETURN_IF_ERROR(ctx, kernel.Exec());
@@ -982,11 +944,13 @@ void RegisterVectorTake(FunctionRegistry* registry) {
   // implementations handle their own memory allocation.
   AddTakeKernel(InputType(match::Primitive(), ValueDescr::ARRAY), PrimitiveTakeExec);
 
-  // Take implementations for Binary, String, LargeBinary, LargeString
+  // Take implementations for Binary, String, LargeBinary, LargeString, and
+  // FixedSizeBinary
   AddTakeKernel(InputType(match::BinaryLike(), ValueDescr::ARRAY),
                 GenericTakeExec<VarBinaryTakeImpl<BinaryType>>);
   AddTakeKernel(InputType(match::LargeBinaryLike(), ValueDescr::ARRAY),
                 GenericTakeExec<VarBinaryTakeImpl<LargeBinaryType>>);
+  AddTakeKernel(InputType::Array(Type::FIXED_SIZE_BINARY), GenericTakeExec<FSBTakeImpl>);
 
   AddTakeKernel(InputType::Array(null()), NullTakeExec);
   AddTakeKernel(InputType::Array(Type::DICTIONARY), DictionaryTakeExec);

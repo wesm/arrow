@@ -77,7 +77,7 @@ class ARROW_EXPORT BitBlockCounter {
 
 /// \brief A tool to iterate through a possibly non-existent validity bitmap,
 /// to allow us to write one code path for both the with-nulls and no-nulls
-/// cases without giving up a lot of performance
+/// cases without giving up a lot of performance.
 class OptionalBitBlockCounter {
  public:
   OptionalBitBlockCounter(const uint8_t* validity_bitmap, int64_t offset, int64_t length);
@@ -85,7 +85,9 @@ class OptionalBitBlockCounter {
   OptionalBitBlockCounter(const std::shared_ptr<Buffer>& validity_bitmap, int64_t offset,
                           int64_t length);
 
-  /// Return block count for next word when the bitmap is
+  /// Return block count for next word when the bitmap is available otherwise
+  /// return a block with length up to INT16_MAX when there is no validity
+  /// bitmap (so all the referenced values are not null).
   BitBlockCount NextBlock() {
     static constexpr int64_t kMaxBlockSize = std::numeric_limits<int16_t>::max();
     if (has_bitmap_) {

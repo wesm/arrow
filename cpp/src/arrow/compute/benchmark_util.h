@@ -57,7 +57,7 @@ void BenchmarkSetArgsWithSizes(benchmark::internal::Benchmark* bench,
   bench->Unit(benchmark::kMicrosecond);
 
   for (auto size : sizes)
-    for (auto nulls : std::vector<ArgsType>({10000, 1000, 100, 50, 10, 1}))
+    for (auto nulls : std::vector<ArgsType>({10000, 1000, 100, 50, 10, 1, 0}))
       bench->Args({static_cast<ArgsType>(size), nulls});
 }
 
@@ -80,9 +80,7 @@ struct RegressionArgs {
   double null_proportion;
 
   explicit RegressionArgs(benchmark::State& state)
-      : size(state.range(0)),
-        null_proportion(),
-        state_(state) {
+      : size(state.range(0)), null_proportion(), state_(state) {
     if (state.range(1) == 0) {
       this->null_proportion = 0.0;
     } else {

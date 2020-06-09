@@ -449,7 +449,8 @@ Status IndexBoundscheckImpl(const ArrayData& indices, uint64_t upper_limit) {
   // For unsigned integers, if the values array is larger than the maximum
   // index value (e.g. especially for UINT8 / UINT16), then there is no need to
   // boundscheck.
-  if (!IsSigned && upper_limit > std::numeric_limits<IndexCType>::max()) {
+  if (!IsSigned &&
+      upper_limit > static_cast<uint64_t>(std::numeric_limits<IndexCType>::max())) {
     return Status::OK();
   }
 

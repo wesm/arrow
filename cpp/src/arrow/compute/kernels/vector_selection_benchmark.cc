@@ -43,10 +43,21 @@ std::vector<int64_t> g_data_sizes = {kL2Size};
 
 // The benchmark state parameter references this vector of cases. Test high and
 // low selectivity filters.
+
+// clang-format off
 std::vector<FilterParams> g_filter_params = {
-    {0., 0.95, 0.05},   {0., 0.10, 0.05},   {0.001, 0.95, 0.05}, {0.001, 0.10, 0.05},
-    {0.01, 0.95, 0.05}, {0.01, 0.10, 0.05}, {0.1, 0.95, 0.05},   {0.1, 0.10, 0.05},
-    {0.9, 0.95, 0.05},  {0.9, 0.10, 0.05}};
+  {0., 0.999, 0.05},
+  {0., 0.50, 0.05},
+  {0.001, 0.999, 0.05},
+  {0.001, 0.50, 0.05},
+  {0.01, 0.999, 0.05},
+  {0.01, 0.50, 0.05},
+  {0.1, 0.999, 0.05},
+  {0.1, 0.50, 0.05},
+  {0.9, 0.999, 0.05},
+  {0.9, 0.50, 0.05}
+};
+// clang-format on
 
 // RAII struct to handle some of the boilerplate in filter
 struct FilterArgs {

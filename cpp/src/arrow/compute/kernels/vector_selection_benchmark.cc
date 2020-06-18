@@ -152,6 +152,27 @@ struct TakeBenchmark {
   }
 };
 
+int64_t FilterOutputSize(FilterOptions::NullSelectionBehavior null_selection,
+                         const Array& arr) {
+  const auto& filter = ::arrow::internal::checked_cast<const BooleanArray&>(arr);
+  // TODO(bkietz) this can be optimized. Use Bitmap::VisitWords
+  int64_t size = 0;
+  if (null_selection == FilterOptions::EMIT_NULL) {
+    for (auto i = 0; i < filter.length(); ++i) {
+      if (filter.IsNull(i) || filter.Value(i)) {
+        ++size;
+      }
+    }
+  } else {
+    for (auto i = 0; i < filter.length(); ++i) {
+      if (filter.IsValid(i) && filter.Value(i)) {
+        ++size;
+      }
+    }
+  }
+  return size;
+}
+
 struct FilterBenchmark {
   benchmark::State& state;
   FilterArgs args;
@@ -214,8 +235,7 @@ struct FilterBenchmark {
     auto filter =
         rand.Boolean(num_rows, args.selected_proportion, args.filter_null_proportion);
 
-    int64_t output_length =
-        internal::GetFilterOutputSize(*filter->data(), FilterOptions::DROP);
+    int64_t output_length = FilterOutputSize(FilterOptions::DROP, *filter);
 
     // HACK: set FilterArgs.size to the number of selected data cells *
     // sizeof(double) for accurate memory processing performance

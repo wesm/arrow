@@ -25,6 +25,7 @@
 #include "arrow/type.h"
 #include "arrow/util/bit_block_counter.h"
 #include "arrow/util/bit_util.h"
+#include "arrow/util/cast_internal.h"
 #include "arrow/util/logging.h"
 #include "arrow/util/macros.h"
 
@@ -466,6 +467,11 @@ Status IndexBoundsCheckImpl(const ArrayData& indices, uint64_t upper_limit) {
         (IsSigned && indices_data[i] < 0) ||
         (indices_data[i] >= 0 && static_cast<uint64_t>(indices_data[i]) >= upper_limit));
   };
+  auto IsOutOfBoundsMaybeNull = [&](int64_t i, bool is_valid) -> bool {
+    return is_valid && ((IsSigned && indices_data[i] < 0) ||
+                        (indices_data[i] >= 0 &&
+                         static_cast<uint64_t>(indices_data[i]) >= upper_limit));
+  };
   OptionalBitBlockCounter indices_bit_counter(bitmap, indices.offset, indices.length);
   int64_t position = 0;
   while (position < indices.length) {
@@ -479,19 +485,17 @@ Status IndexBoundsCheckImpl(const ArrayData& indices, uint64_t upper_limit) {
     } else if (block.popcount > 0) {
       // Indices have nulls, must only boundscheck non-null values
       for (int64_t i = 0; i < block.length; ++i) {
-        if (BitUtil::GetBit(bitmap, indices.offset + position + i)) {
-          block_out_of_bounds |= IsOutOfBounds(i);
-        }
+        block_out_of_bounds |= IsOutOfBoundsMaybeNull(
+            i, BitUtil::GetBit(bitmap, indices.offset + position + i));
       }
     }
     if (ARROW_PREDICT_FALSE(block_out_of_bounds)) {
       if (indices.GetNullCount() > 0) {
         for (int64_t i = 0; i < block.length; ++i) {
-          if (BitUtil::GetBit(bitmap, indices.offset + position + i)) {
-            if (IsOutOfBounds(i)) {
-              return Status::IndexError("Index ", static_cast<int64_t>(indices_data[i]),
-                                        " out of bounds");
-            }
+          if (IsOutOfBoundsMaybeNull(
+                  position + i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
+            return Status::IndexError("Index ", static_cast<int64_t>(indices_data[i]),
+                                      " out of bounds");
           }
         }
       } else {
@@ -530,6 +534,115 @@ Status IndexBoundsCheck(const ArrayData& indices, uint64_t upper_limit) {
       return IndexBoundsCheckImpl<uint32_t>(indices, upper_limit);
     case Type::UINT64:
       return IndexBoundsCheckImpl<uint64_t>(indices, upper_limit);
+    default:
+      return Status::Invalid("Invalid index type for boundschecking");
+  }
+}
+
+#define GET_MIN_MAX_CASE(TYPE, OUT_TYPE)    \
+  case Type::TYPE:                          \
+    *min = SafeMinimum<OUT_TYPE, InType>(); \
+    *max = SafeMaximum<OUT_TYPE, InType>(); \
+    break
+
+template <typename InType, typename T = typename InType::c_type>
+void GetSafeMinMax(Type::type out_type, T* min, T* max) {
+  switch (out_type) {
+    GET_MIN_MAX_CASE(INT8, Int8Type);
+    GET_MIN_MAX_CASE(INT16, Int16Type);
+    GET_MIN_MAX_CASE(INT32, Int32Type);
+    GET_MIN_MAX_CASE(INT64, Int64Type);
+    GET_MIN_MAX_CASE(UINT8, UInt8Type);
+    GET_MIN_MAX_CASE(UINT16, UInt16Type);
+    GET_MIN_MAX_CASE(UINT32, UInt32Type);
+    GET_MIN_MAX_CASE(UINT64, UInt64Type);
+    default:
+      break;
+  }
+}
+
+template <typename InType, typename CType = typename InType::c_type>
+Status IntegersCanFitImpl(const ArrayData& indices, const DataType& target_type) {
+  CType bound_min, bound_max;
+  GetSafeMinMax<InType>(target_type.id(), &bound_min, &bound_max);
+
+  if (std::numeric_limits<CType>::lowest() >= bound_min &&
+      std::numeric_limits<CType>::max() <= bound_max) {
+    return Status::OK();
+  }
+
+  const CType* indices_data = indices.GetValues<CType>(1);
+  const uint8_t* bitmap = nullptr;
+  if (indices.buffers[0]) {
+    bitmap = indices.buffers[0]->data();
+  }
+  auto IsOutOfBounds = [&](int64_t i) -> bool {
+    return indices_data[i] < bound_min || indices_data[i] > bound_max;
+  };
+  auto IsOutOfBoundsMaybeNull = [&](int64_t i, bool is_valid) -> bool {
+    return is_valid && (indices_data[i] < bound_min || indices_data[i] > bound_max);
+  };
+  OptionalBitBlockCounter indices_bit_counter(bitmap, indices.offset, indices.length);
+  int64_t position = 0;
+  while (position < indices.length) {
+    BitBlockCount block = indices_bit_counter.NextBlock();
+    bool block_out_of_bounds = false;
+    if (block.popcount == block.length) {
+      // Fast path: branchless
+      for (int64_t i = 0; i < block.length; ++i) {
+        block_out_of_bounds |= IsOutOfBounds(i);
+      }
+    } else if (block.popcount > 0) {
+      // Indices have nulls, must only boundscheck non-null values
+      for (int64_t i = 0; i < block.length; ++i) {
+        block_out_of_bounds |= IsOutOfBoundsMaybeNull(
+            i, BitUtil::GetBit(bitmap, indices.offset + position + i));
+      }
+    }
+    if (ARROW_PREDICT_FALSE(block_out_of_bounds)) {
+      if (indices.GetNullCount() > 0) {
+        for (int64_t i = 0; i < block.length; ++i) {
+          if (IsOutOfBoundsMaybeNull(
+                  position + i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
+            return Status::Invalid("Integer value ",
+                                   static_cast<int64_t>(indices_data[i]),
+                                   " cannot fit safely in ", target_type);
+          }
+        }
+      } else {
+        for (int64_t i = 0; i < block.length; ++i) {
+          if (IsOutOfBounds(i)) {
+            return Status::Invalid("Integer value ",
+                                   static_cast<int64_t>(indices_data[i]),
+                                   " cannot fit safely in ", target_type);
+          }
+        }
+      }
+    }
+    indices_data += block.length;
+    position += block.length;
+  }
+  return Status::OK();
+}
+
+Status IntegersCanFit(const ArrayData& indices, const DataType& target_type) {
+  switch (indices.type->id()) {
+    case Type::INT8:
+      return IntegersCanFitImpl<Int8Type>(indices, target_type);
+    case Type::INT16:
+      return IntegersCanFitImpl<Int16Type>(indices, target_type);
+    case Type::INT32:
+      return IntegersCanFitImpl<Int32Type>(indices, target_type);
+    case Type::INT64:
+      return IntegersCanFitImpl<Int64Type>(indices, target_type);
+    case Type::UINT8:
+      return IntegersCanFitImpl<UInt8Type>(indices, target_type);
+    case Type::UINT16:
+      return IntegersCanFitImpl<UInt16Type>(indices, target_type);
+    case Type::UINT32:
+      return IntegersCanFitImpl<UInt32Type>(indices, target_type);
+    case Type::UINT64:
+      return IntegersCanFitImpl<UInt64Type>(indices, target_type);
     default:
       return Status::Invalid("Invalid index type for boundschecking");
   }

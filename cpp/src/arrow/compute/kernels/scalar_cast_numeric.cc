@@ -19,187 +19,25 @@
 
 #include "arrow/compute/kernels/common.h"
 #include "arrow/compute/kernels/scalar_cast_internal.h"
+#include "arrow/util/cast_internal.h"
+#include "arrow/util/int_util.h"
 #include "arrow/util/value_parsing.h"
 
 namespace arrow {
 
+using internal::IntegersCanFit;
 using internal::ParseValue;
+using internal::SafeMaximum;
+using internal::SafeMinimum;
+
+using internal::is_float_truncate;
+using internal::is_integral_signed_to_unsigned;
+using internal::is_integral_unsigned_to_signed;
+using internal::is_number_downcast;
+using internal::is_safe_numeric_cast;
 
 namespace compute {
 namespace internal {
-
-// ----------------------------------------------------------------------
-// Integers and Floating Point
-
-// Conversions pairs (<O, I>) are partitioned in 4 type traits:
-// - is_number_downcast
-// - is_integral_signed_to_unsigned
-// - is_integral_unsigned_to_signed
-// - is_float_truncate
-//
-// Each class has a different way of validation if the conversion is safe
-// (either with bounded intervals or with explicit C casts)
-
-template <typename O, typename I, typename Enable = void>
-struct is_number_downcast {
-  static constexpr bool value = false;
-};
-
-template <typename O, typename I>
-struct is_number_downcast<
-    O, I, enable_if_t<is_number_type<O>::value && is_number_type<I>::value>> {
-  using O_T = typename O::c_type;
-  using I_T = typename I::c_type;
-
-  static constexpr bool value =
-      ((!std::is_same<O, I>::value) &&
-       // Both types are of the same sign-ness.
-       ((std::is_signed<O_T>::value == std::is_signed<I_T>::value) &&
-        // Both types are of the same integral-ness.
-        (std::is_floating_point<O_T>::value == std::is_floating_point<I_T>::value)) &&
-       // Smaller output size
-       (sizeof(O_T) < sizeof(I_T)));
-};
-
-template <typename O, typename I, typename Enable = void>
-struct is_integral_signed_to_unsigned {
-  static constexpr bool value = false;
-};
-
-template <typename O, typename I>
-struct is_integral_signed_to_unsigned<
-    O, I, enable_if_t<is_integer_type<O>::value && is_integer_type<I>::value>> {
-  using O_T = typename O::c_type;
-  using I_T = typename I::c_type;
-
-  static constexpr bool value =
-      ((!std::is_same<O, I>::value) &&
-       ((std::is_unsigned<O_T>::value && std::is_signed<I_T>::value)));
-};
-
-template <typename O, typename I, typename Enable = void>
-struct is_integral_unsigned_to_signed {
-  static constexpr bool value = false;
-};
-
-template <typename O, typename I>
-struct is_integral_unsigned_to_signed<
-    O, I, enable_if_t<is_integer_type<O>::value && is_integer_type<I>::value>> {
-  using O_T = typename O::c_type;
-  using I_T = typename I::c_type;
-
-  static constexpr bool value =
-      ((!std::is_same<O, I>::value) &&
-       ((std::is_signed<O_T>::value && std::is_unsigned<I_T>::value)));
-};
-
-// This set of functions SafeMinimum/SafeMaximum would be simplified with
-// C++17 and `if constexpr`.
-
-// clang-format doesn't handle this construct properly. Thus the macro, but it
-// also improves readability.
-//
-// The effective return type of the function is always `I::c_type`, this is
-// just how enable_if works with functions.
-#define RET_TYPE(TRAIT) enable_if_t<TRAIT<O, I>::value, typename I::c_type>
-
-template <typename O, typename I>
-constexpr RET_TYPE(is_number_downcast) SafeMinimum() {
-  using out_type = typename O::c_type;
-
-  return std::numeric_limits<out_type>::lowest();
-}
-
-template <typename O, typename I>
-constexpr RET_TYPE(is_number_downcast) SafeMaximum() {
-  using out_type = typename O::c_type;
-
-  return std::numeric_limits<out_type>::max();
-}
-
-template <typename O, typename I>
-constexpr RET_TYPE(is_integral_unsigned_to_signed) SafeMinimum() {
-  return 0;
-}
-
-template <typename O, typename I>
-constexpr RET_TYPE(is_integral_unsigned_to_signed) SafeMaximum() {
-  using in_type = typename I::c_type;
-  using out_type = typename O::c_type;
-
-  // Equality is missing because in_type::max() > out_type::max() when types
-  // are of the same width.
-  return static_cast<in_type>(sizeof(in_type) < sizeof(out_type)
-                                  ? std::numeric_limits<in_type>::max()
-                                  : std::numeric_limits<out_type>::max());
-}
-
-template <typename O, typename I>
-constexpr RET_TYPE(is_integral_signed_to_unsigned) SafeMinimum() {
-  return 0;
-}
-
-template <typename O, typename I>
-constexpr RET_TYPE(is_integral_signed_to_unsigned) SafeMaximum() {
-  using in_type = typename I::c_type;
-  using out_type = typename O::c_type;
-
-  return static_cast<in_type>(sizeof(in_type) <= sizeof(out_type)
-                                  ? std::numeric_limits<in_type>::max()
-                                  : std::numeric_limits<out_type>::max());
-}
-
-#undef RET_TYPE
-
-// Float to Integer or Integer to Float
-template <typename O, typename I, typename Enable = void>
-struct is_float_truncate {
-  static constexpr bool value = false;
-};
-
-template <typename O, typename I>
-struct is_float_truncate<
-    O, I,
-    enable_if_t<(is_integer_type<O>::value && is_floating_type<I>::value) ||
-                (is_integer_type<I>::value && is_floating_type<O>::value)>> {
-  static constexpr bool value = true;
-};
-
-// Leftover of Number combinations that are safe to cast.
-template <typename O, typename I, typename Enable = void>
-struct is_safe_numeric_cast {
-  static constexpr bool value = false;
-};
-
-template <typename O, typename I>
-struct is_safe_numeric_cast<
-    O, I, enable_if_t<is_number_type<O>::value && is_number_type<I>::value>> {
-  using O_T = typename O::c_type;
-  using I_T = typename I::c_type;
-
-  static constexpr bool value =
-      (std::is_signed<O_T>::value == std::is_signed<I_T>::value) &&
-      (std::is_integral<O_T>::value == std::is_integral<I_T>::value) &&
-      (sizeof(O_T) >= sizeof(I_T)) && (!std::is_same<O, I>::value);
-};
-
-// ----------------------------------------------------------------------
-// Integer to other number types
-
-template <typename O, typename I>
-struct IntegerDowncastNoOverflow {
-  using InT = typename I::c_type;
-  static constexpr InT kMax = SafeMaximum<O, I>();
-  static constexpr InT kMin = SafeMinimum<O, I>();
-
-  template <typename OutT, typename InT>
-  OutT Call(KernelContext* ctx, InT val) const {
-    if (ARROW_PREDICT_FALSE(val > kMax || val < kMin)) {
-      ctx->SetStatus(Status::Invalid("Integer value out of bounds"));
-    }
-    return static_cast<OutT>(val);
-  }
-};
 
 struct StaticCast {
   template <typename OutT, typename InT>
@@ -211,22 +49,25 @@ struct StaticCast {
 
 template <typename O, typename I>
 struct CastFunctor<O, I,
-                   enable_if_t<is_number_downcast<O, I>::value ||
-                               is_integral_signed_to_unsigned<O, I>::value ||
-                               is_integral_unsigned_to_signed<O, I>::value>> {
+                   enable_if_t<!std::is_same<O, I>::value && is_integer_type<O>::value &&
+                               is_integer_type<I>::value>> {
   static void Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
     const auto& options = checked_cast<const CastState*>(ctx->state())->options;
     if (!options.allow_int_overflow) {
-      applicator::ScalarUnaryNotNull<O, I, IntegerDowncastNoOverflow<O, I>>::Exec(
-          ctx, batch, out);
-    } else {
-      applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
+      KERNEL_RETURN_IF_ERROR(ctx, IntegersCanFit(*batch[0].array(), *out->type()));
     }
+    applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
   }
 };
 
-// ----------------------------------------------------------------------
-// Float to other number types
+template <typename O, typename I>
+struct CastFunctor<O, I,
+                   enable_if_t<!std::is_same<O, I>::value && is_floating_type<O>::value &&
+                               is_floating_type<I>::value>> {
+  static void Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+    applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
+  }
+};
 
 struct FloatToIntegerNoTruncate {
   template <typename OutT, typename InT>
@@ -251,18 +92,6 @@ struct CastFunctor<O, I, enable_if_t<is_float_truncate<O, I>::value>> {
       applicator::ScalarUnaryNotNull<O, I, FloatToIntegerNoTruncate>::Exec(ctx, batch,
                                                                            out);
     }
-  }
-};
-
-template <typename O, typename I>
-struct CastFunctor<
-    O, I,
-    enable_if_t<is_safe_numeric_cast<O, I>::value && !is_float_truncate<O, I>::value &&
-                !is_number_downcast<O, I>::value>> {
-  static void Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
-    // Due to various checks done via type-trait, the cast is safe and bear
-    // no truncation.
-    applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
   }
 };
 
@@ -475,6 +304,8 @@ struct CastFunctor<Decimal128Type, Decimal128Type> {
   }
 };
 
+namespace {
+
 template <typename OutType>
 void AddPrimitiveNumberCasts(const std::shared_ptr<DataType>& out_ty,
                              CastFunction* func) {
@@ -534,6 +365,8 @@ std::shared_ptr<CastFunction> GetCastToDecimal() {
                             exec));
   return func;
 }
+
+}  // namespace
 
 std::vector<std::shared_ptr<CastFunction>> GetNumericCasts() {
   std::vector<std::shared_ptr<CastFunction>> functions;

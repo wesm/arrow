@@ -26,6 +26,7 @@
 
 namespace arrow {
 
+class DataType;
 struct ArrayData;
 
 namespace internal {
@@ -122,11 +123,16 @@ UpcastInt(Integer v) {
   return v;
 }
 
-/// \brief Do vectorized boundschecking of integer-type indices. The indices
-/// must be non-nonnegative and strictly less than the passed upper limit
-/// (which is usually the length of an array that is being indexed-into).
+/// \brief Do vectorized boundschecking of integer-type array indices. The
+/// indices must be non-nonnegative and strictly less than the passed upper
+/// limit (which is usually the length of an array that is being indexed-into).
 ARROW_EXPORT
 Status IndexBoundsCheck(const ArrayData& indices, uint64_t upper_limit);
+
+/// \brief Boundscheck integer values to determine if they fit in the passed
+/// data type
+ARROW_EXPORT
+Status IntegersCanFit(const ArrayData& indices, const DataType& target_type);
 
 }  // namespace internal
 }  // namespace arrow

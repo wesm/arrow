@@ -493,7 +493,7 @@ Status IndexBoundsCheckImpl(const ArrayData& indices, uint64_t upper_limit) {
       if (indices.GetNullCount() > 0) {
         for (int64_t i = 0; i < block.length; ++i) {
           if (IsOutOfBoundsMaybeNull(
-                  position + i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
+                  i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
             return Status::IndexError("Index ", static_cast<int64_t>(indices_data[i]),
                                       " out of bounds");
           }
@@ -603,7 +603,7 @@ Status IntegersCanFitImpl(const ArrayData& indices, const DataType& target_type)
       if (indices.GetNullCount() > 0) {
         for (int64_t i = 0; i < block.length; ++i) {
           if (IsOutOfBoundsMaybeNull(
-                  position + i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
+                  i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
             return Status::Invalid("Integer value ",
                                    static_cast<int64_t>(indices_data[i]),
                                    " cannot fit safely in ", target_type);

@@ -474,26 +474,42 @@ Status IndexBoundsCheckImpl(const ArrayData& indices, uint64_t upper_limit) {
   };
   OptionalBitBlockCounter indices_bit_counter(bitmap, indices.offset, indices.length);
   int64_t position = 0;
+  int64_t offset_position = indices.offset;
   while (position < indices.length) {
     BitBlockCount block = indices_bit_counter.NextBlock();
     bool block_out_of_bounds = false;
     if (block.popcount == block.length) {
       // Fast path: branchless
-      for (int64_t i = 0; i < block.length; ++i) {
-        block_out_of_bounds |= IsOutOfBounds(i);
+      int64_t i = 0;
+      for (int64_t chunk = 0; chunk < block.length / 8; ++chunk) {
+        // Let the compiler unroll this
+        for (int j = 0; j < 8; ++j) {
+          block_out_of_bounds |= IsOutOfBounds(i++);
+        }
+      }
+      for (; i < block.length; ++i) {
+        block_out_of_bounds |= IsOutOfBounds(i++);
       }
     } else if (block.popcount > 0) {
       // Indices have nulls, must only boundscheck non-null values
-      for (int64_t i = 0; i < block.length; ++i) {
-        block_out_of_bounds |= IsOutOfBoundsMaybeNull(
-            i, BitUtil::GetBit(bitmap, indices.offset + position + i));
+      int64_t i = 0;
+      for (int64_t chunk = 0; chunk < block.length / 8; ++chunk) {
+        // Let the compiler unroll this
+        for (int j = 0; j < 8; ++j) {
+          block_out_of_bounds |=
+              IsOutOfBoundsMaybeNull(i, BitUtil::GetBit(bitmap, offset_position + i));
+          ++i;
+        }
+      }
+      for (; i < block.length; ++i) {
+        block_out_of_bounds |=
+            IsOutOfBoundsMaybeNull(i, BitUtil::GetBit(bitmap, offset_position + i));
       }
     }
     if (ARROW_PREDICT_FALSE(block_out_of_bounds)) {
       if (indices.GetNullCount() > 0) {
         for (int64_t i = 0; i < block.length; ++i) {
-          if (IsOutOfBoundsMaybeNull(
-                  i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
+          if (IsOutOfBoundsMaybeNull(i, BitUtil::GetBit(bitmap, offset_position + i))) {
             return Status::IndexError("Index ", static_cast<int64_t>(indices_data[i]),
                                       " out of bounds");
           }
@@ -509,6 +525,7 @@ Status IndexBoundsCheckImpl(const ArrayData& indices, uint64_t upper_limit) {
     }
     indices_data += block.length;
     position += block.length;
+    offset_position += block.length;
   }
   return Status::OK();
 }
@@ -584,26 +601,42 @@ Status IntegersCanFitImpl(const ArrayData& indices, const DataType& target_type)
   };
   OptionalBitBlockCounter indices_bit_counter(bitmap, indices.offset, indices.length);
   int64_t position = 0;
+  int64_t offset_position = indices.offset;
   while (position < indices.length) {
     BitBlockCount block = indices_bit_counter.NextBlock();
     bool block_out_of_bounds = false;
     if (block.popcount == block.length) {
       // Fast path: branchless
-      for (int64_t i = 0; i < block.length; ++i) {
+      int64_t i = 0;
+      for (int64_t chunk = 0; chunk < block.length / 8; ++chunk) {
+        // Let the compiler unroll this
+        for (int j = 0; j < 8; ++j) {
+          block_out_of_bounds |= IsOutOfBounds(i++);
+        }
+      }
+      for (; i < block.length; ++i) {
         block_out_of_bounds |= IsOutOfBounds(i);
       }
     } else if (block.popcount > 0) {
       // Indices have nulls, must only boundscheck non-null values
-      for (int64_t i = 0; i < block.length; ++i) {
-        block_out_of_bounds |= IsOutOfBoundsMaybeNull(
-            i, BitUtil::GetBit(bitmap, indices.offset + position + i));
+      int64_t i = 0;
+      for (int64_t chunk = 0; chunk < block.length / 8; ++chunk) {
+        // Let the compiler unroll this
+        for (int j = 0; j < 8; ++j) {
+          block_out_of_bounds |=
+              IsOutOfBoundsMaybeNull(i, BitUtil::GetBit(bitmap, offset_position + i));
+          ++i;
+        }
+      }
+      for (; i < block.length; ++i) {
+        block_out_of_bounds |=
+            IsOutOfBoundsMaybeNull(i, BitUtil::GetBit(bitmap, offset_position + i));
       }
     }
     if (ARROW_PREDICT_FALSE(block_out_of_bounds)) {
       if (indices.GetNullCount() > 0) {
         for (int64_t i = 0; i < block.length; ++i) {
-          if (IsOutOfBoundsMaybeNull(
-                  i, BitUtil::GetBit(bitmap, indices.offset + position + i))) {
+          if (IsOutOfBoundsMaybeNull(i, BitUtil::GetBit(bitmap, offset_position + i))) {
             return Status::Invalid("Integer value ",
                                    static_cast<int64_t>(indices_data[i]),
                                    " cannot fit safely in ", target_type);
@@ -621,6 +654,7 @@ Status IntegersCanFitImpl(const ArrayData& indices, const DataType& target_type)
     }
     indices_data += block.length;
     position += block.length;
+    offset_position += block.length;
   }
   return Status::OK();
 }

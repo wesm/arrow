@@ -39,13 +39,41 @@ using internal::is_safe_numeric_cast;
 namespace compute {
 namespace internal {
 
-struct StaticCast {
-  template <typename OutT, typename InT>
-  ARROW_DISABLE_UBSAN("float-cast-overflow")
-  static OutT Call(KernelContext*, InT val) {
-    return static_cast<OutT>(val);
+template <typename OutT, typename InT>
+ARROW_DISABLE_UBSAN("float-cast-overflow")
+void DoStaticCast(const void* in_data, int64_t in_offset, int64_t length,
+                  int64_t out_offset, void* out_data) {
+  auto in = reinterpret_cast<const InT*>(in_data) + in_offset;
+  auto out = reinterpret_cast<OutT*>(out_data) + out_offset;
+  for (int64_t i = 0; i < length; ++i) {
+    *out++ = static_cast<OutT>(*in++);
   }
-};
+}
+
+using StaticCastFunc = std::function<void(const void*, int64_t, int64_t, int64_t, void*)>;
+
+template <typename OutType, typename InType>
+void StaticCast(const ExecBatch& batch, Datum* out) {
+  using OutT = typename OutType::c_type;
+  using InT = typename InType::c_type;
+  using OutScalar = typename TypeTraits<OutType>::ScalarType;
+  using InScalar = typename TypeTraits<InType>::ScalarType;
+
+  StaticCastFunc caster = DoStaticCast<OutT, InT>;
+  if (batch[0].kind() == Datum::ARRAY) {
+    const ArrayData& arr = *batch[0].array();
+    ArrayData* out_arr = out->mutable_array();
+    caster(arr.buffers[1]->data(), arr.offset, arr.length, out_arr->offset,
+           out_arr->buffers[1]->mutable_data());
+  } else {
+    // Scalar path. Use the caster with length 1 to place the casted value into
+    // the output
+    const auto& in_scalar = batch[0].scalar_as<InScalar>();
+    auto out_scalar = checked_cast<OutScalar*>(out->scalar().get());
+    caster(&in_scalar.value, /*in_offset=*/0, /*length=*/1, /*out_offset=*/0,
+           &out_scalar->value);
+  }
+}
 
 template <typename O, typename I>
 struct CastFunctor<O, I,
@@ -56,7 +84,7 @@ struct CastFunctor<O, I,
     if (!options.allow_int_overflow) {
       KERNEL_RETURN_IF_ERROR(ctx, IntegersCanFit(*batch[0].array(), *out->type()));
     }
-    applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
+    StaticCast<O, I>(batch, out);
   }
 };
 
@@ -65,7 +93,7 @@ struct CastFunctor<O, I,
                    enable_if_t<!std::is_same<O, I>::value && is_floating_type<O>::value &&
                                is_floating_type<I>::value>> {
   static void Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
-    applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
+    StaticCast<O, I>(batch, out);
   }
 };
 
@@ -87,7 +115,7 @@ struct CastFunctor<O, I, enable_if_t<is_float_truncate<O, I>::value>> {
   static void Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
     const auto& options = checked_cast<const CastState*>(ctx->state())->options;
     if (options.allow_float_truncate) {
-      applicator::ScalarUnary<O, I, StaticCast>::Exec(ctx, batch, out);
+      StaticCast<O, I>(batch, out);
     } else {
       applicator::ScalarUnaryNotNull<O, I, FloatToIntegerNoTruncate>::Exec(ctx, batch,
                                                                            out);

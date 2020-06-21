@@ -89,8 +89,14 @@ static void Int64ToInt32Unsafe(benchmark::State& state) {
                                   std::numeric_limits<int32_t>::max());
 }
 
+static void UInt32ToInt32Safe(benchmark::State& state) {
+  BenchmarkIntegerCast<UInt32Type>(state, int32(), CastOptions::Safe(), 0,
+                                   std::numeric_limits<int32_t>::max());
+}
+
 BENCHMARK(Int64ToInt32Safe)->Apply(CastSetArgs);
 BENCHMARK(Int64ToInt32Unsafe)->Apply(CastSetArgs);
+BENCHMARK(UInt32ToInt32Safe)->Apply(CastSetArgs);
 
 }  // namespace compute
 }  // namespace arrow

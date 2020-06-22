@@ -26,6 +26,7 @@
 #include "arrow/scalar.h"
 #include "arrow/status.h"
 #include "arrow/type.h"
+#include "arrow/util/bit_block_counter.h"
 #include "arrow/util/bit_util.h"
 #include "arrow/util/bitmap_reader.h"
 #include "arrow/util/checked_cast.h"
@@ -116,6 +117,75 @@ namespace internal {
 template <typename T, typename Enable = void>
 struct ArrayDataInlineVisitor {};
 
+namespace detail {
+
+template <typename VisitNotNull, typename VisitNull>
+Status VisitBitBlocks(const std::shared_ptr<Buffer>& bitmap_buf, int64_t offset,
+                      int64_t length, VisitNotNull&& visit_not_null,
+                      VisitNull&& visit_null) {
+  const uint8_t* bitmap = nullptr;
+  if (bitmap_buf != nullptr) {
+    bitmap = bitmap_buf->data();
+  }
+  internal::OptionalBitBlockCounter bit_counter(bitmap, offset, length);
+  int64_t position = 0;
+  while (position < length) {
+    internal::BitBlockCount block = bit_counter.NextBlock();
+    if (block.AllSet()) {
+      for (int64_t i = 0; i < block.length; ++i, ++position) {
+        ARROW_RETURN_NOT_OK(visit_not_null(position));
+      }
+    } else if (block.NoneSet()) {
+      for (int64_t i = 0; i < block.length; ++i, ++position) {
+        ARROW_RETURN_NOT_OK(visit_null());
+      }
+    } else {
+      for (int64_t i = 0; i < block.length; ++i, ++position) {
+        if (BitUtil::GetBit(bitmap, arr.offset + position)) {
+          ARROW_RETURN_NOT_OK(visit_not_null(position));
+        } else {
+          ARROW_RETURN_NOT_OK(visit_null());
+        }
+      }
+    }
+  }
+  return Status::OK();
+}
+
+template <typename VisitNotNull, typename VisitNull>
+Status VisitBitBlocksVoid(const std::shared_ptr<Buffer>& bitmap_buf, int64_t offset,
+                          int64_t length, VisitNotNull&& visit_not_null,
+                          VisitNull&& visit_null) {
+  const uint8_t* bitmap = nullptr;
+  if (bitmap_buf != nullptr) {
+    bitmap = bitmap_buf->data();
+  }
+  internal::OptionalBitBlockCounter bit_counter(bitmap, offset, length);
+  int64_t position = 0;
+  while (position < length) {
+    internal::BitBlockCount block = bit_counter.NextBlock();
+    if (block.AllSet()) {
+      for (int64_t i = 0; i < block.length; ++i, ++position) {
+        visit_not_null(position);
+      }
+    } else if (block.NoneSet()) {
+      for (int64_t i = 0; i < block.length; ++i, ++position) {
+        visit_null();
+      }
+    } else {
+      for (int64_t i = 0; i < block.length; ++i, ++position) {
+        if (BitUtil::GetBit(bitmap, arr.offset + position)) {
+          visit_not_null(position);
+        } else {
+          visit_null();
+        }
+      }
+    }
+  }
+}
+
+}  // namespace detail
+
 // Numeric and primitive C-compatible types
 template <typename T>
 struct ArrayDataInlineVisitor<T, enable_if_has_c_type<T>> {
@@ -124,47 +194,27 @@ struct ArrayDataInlineVisitor<T, enable_if_has_c_type<T>> {
   template <typename VisitFunc>
   static Status VisitStatus(const ArrayData& arr, VisitFunc&& func) {
     const c_type* data = arr.GetValues<c_type>(1);
-
-    if (arr.null_count != 0) {
-      internal::BitmapReader valid_reader(arr.buffers[0]->data(), arr.offset, arr.length);
-      for (int64_t i = 0; i < arr.length; ++i) {
-        const bool is_null = valid_reader.IsNotSet();
-        if (is_null) {
-          ARROW_RETURN_NOT_OK(func(util::optional<c_type>()));
-        } else {
-          ARROW_RETURN_NOT_OK(func(util::optional<c_type>(data[i])));
-        }
-        valid_reader.Next();
-      }
-    } else {
-      for (int64_t i = 0; i < arr.length; ++i) {
-        ARROW_RETURN_NOT_OK(func(util::optional<c_type>(data[i])));
-      }
-    }
-    return Status::OK();
+    return detail::VisitBitBlocks(arr.buffers[0], arr.offset, arr.length,
+                                  [&](int64_t position) {
+                                    return func(util::optional<c_type>(data[position]));
+                                  },
+                                  [&]() {
+                                    return func(util::optional<c_type>());
+                                  });
   }
 
   template <typename VisitFunc>
   static void VisitVoid(const ArrayData& arr, VisitFunc&& func) {
     using c_type = typename T::c_type;
     const c_type* data = arr.GetValues<c_type>(1);
-
-    if (arr.null_count != 0) {
-      internal::BitmapReader valid_reader(arr.buffers[0]->data(), arr.offset, arr.length);
-      for (int64_t i = 0; i < arr.length; ++i) {
-        const bool is_null = valid_reader.IsNotSet();
-        if (is_null) {
+    return detail::VisitBitBlocksVoid(
+        arr.buffers[0], arr.offset, arr.length,
+        [&](int64_t position) {
+          func(util::optional<c_type>(data[position]));
+        },
+        [&]() {
           func(util::optional<c_type>());
-        } else {
-          func(util::optional<c_type>(data[i]));
-        }
-        valid_reader.Next();
-      }
-    } else {
-      for (int64_t i = 0; i < arr.length; ++i) {
-        func(util::optional<c_type>(data[i]));
-      }
-    }
+        });
   }
 };
 

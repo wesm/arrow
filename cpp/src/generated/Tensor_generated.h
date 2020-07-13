@@ -169,6 +169,9 @@ struct Tensor FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const org::apache::arrow::flatbuf::LargeList *type_as_LargeList() const {
     return type_type() == org::apache::arrow::flatbuf::Type::LargeList ? static_cast<const org::apache::arrow::flatbuf::LargeList *>(type()) : nullptr;
   }
+  const org::apache::arrow::flatbuf::UnknownType *type_as_UnknownType() const {
+    return type_type() == org::apache::arrow::flatbuf::Type::UnknownType ? static_cast<const org::apache::arrow::flatbuf::UnknownType *>(type()) : nullptr;
+  }
   /// The dimensions of the tensor, optionally named
   const flatbuffers::Vector<flatbuffers::Offset<org::apache::arrow::flatbuf::TensorDim>> *shape() const {
     return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<org::apache::arrow::flatbuf::TensorDim>> *>(VT_SHAPE);
@@ -279,6 +282,10 @@ template<> inline const org::apache::arrow::flatbuf::LargeUtf8 *Tensor::type_as<
 
 template<> inline const org::apache::arrow::flatbuf::LargeList *Tensor::type_as<org::apache::arrow::flatbuf::LargeList>() const {
   return type_as_LargeList();
+}
+
+template<> inline const org::apache::arrow::flatbuf::UnknownType *Tensor::type_as<org::apache::arrow::flatbuf::UnknownType>() const {
+  return type_as_UnknownType();
 }
 
 struct TensorBuilder {

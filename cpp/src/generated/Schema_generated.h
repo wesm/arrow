@@ -74,6 +74,9 @@ struct IntervalBuilder;
 struct Duration;
 struct DurationBuilder;
 
+struct UnknownType;
+struct UnknownTypeBuilder;
+
 struct KeyValue;
 struct KeyValueBuilder;
 
@@ -105,35 +108,41 @@ enum class MetadataVersion : int16_t {
   /// - Union buffer layout has changed. In V5, Unions don't have a validity
   ///   bitmap buffer.
   V5 = 4,
+  V6 = 5,
+  V7 = 6,
   MIN = V1,
-  MAX = V5
+  MAX = V7
 };
 
-inline const MetadataVersion (&EnumValuesMetadataVersion())[5] {
+inline const MetadataVersion (&EnumValuesMetadataVersion())[7] {
   static const MetadataVersion values[] = {
     MetadataVersion::V1,
     MetadataVersion::V2,
     MetadataVersion::V3,
     MetadataVersion::V4,
-    MetadataVersion::V5
+    MetadataVersion::V5,
+    MetadataVersion::V6,
+    MetadataVersion::V7
   };
   return values;
 }
 
 inline const char * const *EnumNamesMetadataVersion() {
-  static const char * const names[6] = {
+  static const char * const names[8] = {
     "V1",
     "V2",
     "V3",
     "V4",
     "V5",
+    "V6",
+    "V7",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameMetadataVersion(MetadataVersion e) {
-  if (flatbuffers::IsOutRange(e, MetadataVersion::V1, MetadataVersion::V5)) return "";
+  if (flatbuffers::IsOutRange(e, MetadataVersion::V1, MetadataVersion::V7)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesMetadataVersion()[index];
 }
@@ -379,11 +388,12 @@ enum class Type : uint8_t {
   LargeBinary = 19,
   LargeUtf8 = 20,
   LargeList = 21,
+  UnknownType = 22,
   MIN = NONE,
-  MAX = LargeList
+  MAX = UnknownType
 };
 
-inline const Type (&EnumValuesType())[22] {
+inline const Type (&EnumValuesType())[23] {
   static const Type values[] = {
     Type::NONE,
     Type::Null,
@@ -406,13 +416,14 @@ inline const Type (&EnumValuesType())[22] {
     Type::Duration,
     Type::LargeBinary,
     Type::LargeUtf8,
-    Type::LargeList
+    Type::LargeList,
+    Type::UnknownType
   };
   return values;
 }
 
 inline const char * const *EnumNamesType() {
-  static const char * const names[23] = {
+  static const char * const names[24] = {
     "NONE",
     "Null",
     "Int",
@@ -435,13 +446,14 @@ inline const char * const *EnumNamesType() {
     "LargeBinary",
     "LargeUtf8",
     "LargeList",
+    "UnknownType",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameType(Type e) {
-  if (flatbuffers::IsOutRange(e, Type::NONE, Type::LargeList)) return "";
+  if (flatbuffers::IsOutRange(e, Type::NONE, Type::UnknownType)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesType()[index];
 }
@@ -532,6 +544,10 @@ template<> struct TypeTraits<org::apache::arrow::flatbuf::LargeUtf8> {
 
 template<> struct TypeTraits<org::apache::arrow::flatbuf::LargeList> {
   static const Type enum_value = Type::LargeList;
+};
+
+template<> struct TypeTraits<org::apache::arrow::flatbuf::UnknownType> {
+  static const Type enum_value = Type::UnknownType;
 };
 
 bool VerifyType(flatbuffers::Verifier &verifier, const void *obj, Type type);
@@ -1578,6 +1594,58 @@ inline flatbuffers::Offset<Duration> CreateDuration(
   return builder_.Finish();
 }
 
+struct UnknownType FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef UnknownTypeBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_BITWIDTH = 4,
+    VT_IS_SIGNED = 6
+  };
+  int32_t bitWidth() const {
+    return GetField<int32_t>(VT_BITWIDTH, 0);
+  }
+  bool is_signed() const {
+    return GetField<uint8_t>(VT_IS_SIGNED, 0) != 0;
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<int32_t>(verifier, VT_BITWIDTH) &&
+           VerifyField<uint8_t>(verifier, VT_IS_SIGNED) &&
+           verifier.EndTable();
+  }
+};
+
+struct UnknownTypeBuilder {
+  typedef UnknownType Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_bitWidth(int32_t bitWidth) {
+    fbb_.AddElement<int32_t>(UnknownType::VT_BITWIDTH, bitWidth, 0);
+  }
+  void add_is_signed(bool is_signed) {
+    fbb_.AddElement<uint8_t>(UnknownType::VT_IS_SIGNED, static_cast<uint8_t>(is_signed), 0);
+  }
+  explicit UnknownTypeBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  UnknownTypeBuilder &operator=(const UnknownTypeBuilder &);
+  flatbuffers::Offset<UnknownType> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<UnknownType>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<UnknownType> CreateUnknownType(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    int32_t bitWidth = 0,
+    bool is_signed = false) {
+  UnknownTypeBuilder builder_(_fbb);
+  builder_.add_bitWidth(bitWidth);
+  builder_.add_is_signed(is_signed);
+  return builder_.Finish();
+}
+
 /// ----------------------------------------------------------------------
 /// user defined key value pairs to add custom metadata to arrow
 /// key namespacing is the responsibility of the user
@@ -1825,6 +1893,9 @@ struct Field FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const org::apache::arrow::flatbuf::LargeList *type_as_LargeList() const {
     return type_type() == org::apache::arrow::flatbuf::Type::LargeList ? static_cast<const org::apache::arrow::flatbuf::LargeList *>(type()) : nullptr;
   }
+  const org::apache::arrow::flatbuf::UnknownType *type_as_UnknownType() const {
+    return type_type() == org::apache::arrow::flatbuf::Type::UnknownType ? static_cast<const org::apache::arrow::flatbuf::UnknownType *>(type()) : nullptr;
+  }
   /// Present only if the field is dictionary encoded.
   const org::apache::arrow::flatbuf::DictionaryEncoding *dictionary() const {
     return GetPointer<const org::apache::arrow::flatbuf::DictionaryEncoding *>(VT_DICTIONARY);
@@ -1940,6 +2011,10 @@ template<> inline const org::apache::arrow::flatbuf::LargeUtf8 *Field::type_as<o
 
 template<> inline const org::apache::arrow::flatbuf::LargeList *Field::type_as<org::apache::arrow::flatbuf::LargeList>() const {
   return type_as_LargeList();
+}
+
+template<> inline const org::apache::arrow::flatbuf::UnknownType *Field::type_as<org::apache::arrow::flatbuf::UnknownType>() const {
+  return type_as_UnknownType();
 }
 
 struct FieldBuilder {
@@ -2209,6 +2284,10 @@ inline bool VerifyType(flatbuffers::Verifier &verifier, const void *obj, Type ty
     }
     case Type::LargeList: {
       auto ptr = reinterpret_cast<const org::apache::arrow::flatbuf::LargeList *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case Type::UnknownType: {
+      auto ptr = reinterpret_cast<const org::apache::arrow::flatbuf::UnknownType *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;

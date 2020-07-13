@@ -40,6 +40,10 @@ enum MetadataVersion:short {
   /// - Union buffer layout has changed. In V5, Unions don't have a validity
   ///   bitmap buffer.
   V5,
+
+  // DONOTMERGE: FOR FORWARD COMPATIBILITY TESTS
+  V6,
+  V7
 }
 
 /// Represents Arrow Features that might not have full support
@@ -277,6 +281,12 @@ table Duration {
   unit: TimeUnit = MILLISECOND;
 }
 
+// DONOTMERGE: FOR FORWARD COMPATIBILITY TESTS
+table UnknownType {
+  bitWidth: int; // restricted to 8, 16, 32, and 64 in v1
+  is_signed: bool;
+}
+
 /// ----------------------------------------------------------------------
 /// Top-level Type value, enabling extensible type-specific metadata. We can
 /// add new logical types to Type without breaking backwards compatibility
@@ -303,6 +313,9 @@ union Type {
   LargeBinary,
   LargeUtf8,
   LargeList,
+
+  // DONOTMERGE: FOR FORWARD COMPATIBILITY TESTS
+  UnknownType
 }
 
 /// ----------------------------------------------------------------------

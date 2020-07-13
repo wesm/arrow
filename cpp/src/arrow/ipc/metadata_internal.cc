@@ -158,7 +158,7 @@ Status FieldToFlatbuffer(FBB& fbb, const std::shared_ptr<Field>& field,
                          DictionaryMemo* dictionary_memo, FieldOffset* offset);
 
 Offset IntToFlatbuffer(FBB& fbb, int bitWidth, bool is_signed) {
-  return flatbuf::CreateInt(fbb, bitWidth, is_signed).Union();
+  return flatbuf::CreateUnknownType(fbb, bitWidth, is_signed).Union();
 }
 
 Offset FloatToFlatbuffer(FBB& fbb, flatbuf::Precision precision) {

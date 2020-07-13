@@ -1321,6 +1321,8 @@ cdef extern from "arrow/ipc/api.h" namespace "arrow::ipc" nogil:
         CMetadataVersion_V3" arrow::ipc::MetadataVersion::V3"
         CMetadataVersion_V4" arrow::ipc::MetadataVersion::V4"
         CMetadataVersion_V5" arrow::ipc::MetadataVersion::V5"
+        CMetadataVersion_V6" arrow::ipc::MetadataVersion::V6"
+        CMetadataVersion_V7" arrow::ipc::MetadataVersion::V7"
 
     cdef cppclass CIpcWriteOptions" arrow::ipc::IpcWriteOptions":
         c_bool allow_64bit

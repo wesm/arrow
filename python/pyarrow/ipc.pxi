@@ -24,6 +24,8 @@ cpdef enum MetadataVersion:
     V3 = <char> CMetadataVersion_V3
     V4 = <char> CMetadataVersion_V4
     V5 = <char> CMetadataVersion_V5
+    V6 = <char> CMetadataVersion_V6
+    V7 = <char> CMetadataVersion_V7
 
 
 cdef object _wrap_metadata_version(CMetadataVersion version):
@@ -42,6 +44,10 @@ cdef CMetadataVersion _unwrap_metadata_version(
         return CMetadataVersion_V4
     elif version == MetadataVersion.V5:
         return CMetadataVersion_V5
+    elif version == MetadataVersion.V6:
+        return CMetadataVersion_V6
+    elif version == MetadataVersion.V7:
+        return CMetadataVersion_V7
     raise ValueError("Not a metadata version: " + repr(version))
 
 

@@ -140,7 +140,9 @@ bool VerifySparseTensorIndexVector(flatbuffers::Verifier &verifier, const flatbu
 ///    [2, 2, 3, 1, 2, 0],
 ///    [0, 1, 0, 0, 3, 4]]
 ///
-/// Note that the indices are sorted in lexicographical order.
+/// When isCanonical is true, the indices is sorted in lexicographical order
+/// (row-major order), and it does not have duplicated entries.  Otherwise,
+/// the indices may not be sorted, or may have duplicated entries.
 struct SparseTensorIndexCOO FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef SparseTensorIndexCOOBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -162,7 +164,11 @@ struct SparseTensorIndexCOO FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table
   const org::apache::arrow::flatbuf::Buffer *indicesBuffer() const {
     return GetStruct<const org::apache::arrow::flatbuf::Buffer *>(VT_INDICESBUFFER);
   }
-  /// The canonicality flag
+  /// This flag is true if and only if the indices matrix is sorted in
+  /// row-major order, and does not have duplicated entries.
+  /// This sort order is the same as of Tensorflow's SparseTensor,
+  /// but it is inverse order of SciPy's canonical coo_matrix
+  /// (SciPy employs column-major order for its coo_matrix).
   bool isCanonical() const {
     return GetField<uint8_t>(VT_ISCANONICAL, 0) != 0;
   }
@@ -618,6 +624,9 @@ struct SparseTensor FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const org::apache::arrow::flatbuf::LargeList *type_as_LargeList() const {
     return type_type() == org::apache::arrow::flatbuf::Type::LargeList ? static_cast<const org::apache::arrow::flatbuf::LargeList *>(type()) : nullptr;
   }
+  const org::apache::arrow::flatbuf::UnknownType *type_as_UnknownType() const {
+    return type_type() == org::apache::arrow::flatbuf::Type::UnknownType ? static_cast<const org::apache::arrow::flatbuf::UnknownType *>(type()) : nullptr;
+  }
   /// The dimensions of the tensor, optionally named.
   const flatbuffers::Vector<flatbuffers::Offset<org::apache::arrow::flatbuf::TensorDim>> *shape() const {
     return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<org::apache::arrow::flatbuf::TensorDim>> *>(VT_SHAPE);
@@ -746,6 +755,10 @@ template<> inline const org::apache::arrow::flatbuf::LargeUtf8 *SparseTensor::ty
 
 template<> inline const org::apache::arrow::flatbuf::LargeList *SparseTensor::type_as<org::apache::arrow::flatbuf::LargeList>() const {
   return type_as_LargeList();
+}
+
+template<> inline const org::apache::arrow::flatbuf::UnknownType *SparseTensor::type_as<org::apache::arrow::flatbuf::UnknownType>() const {
+  return type_as_UnknownType();
 }
 
 template<> inline const org::apache::arrow::flatbuf::SparseTensorIndexCOO *SparseTensor::sparseIndex_as<org::apache::arrow::flatbuf::SparseTensorIndexCOO>() const {

@@ -124,13 +124,10 @@ void CheckDictEncode(const std::shared_ptr<Array>& input,
                      const std::shared_ptr<Array>& expected_values,
                      const std::shared_ptr<Array>& expected_indices) {
   auto type = dictionary(expected_indices->type(), expected_values->type());
-  DictionaryArray expected(type, expected_indices, expected_values);
-
+  auto expected =
+      std::make_shared<DictionaryArray>(type, expected_indices, expected_values);
   ASSERT_OK_AND_ASSIGN(Datum datum_out, DictionaryEncode(input));
-  std::shared_ptr<Array> result = MakeArray(datum_out.array());
-  ASSERT_OK(result->ValidateFull());
-
-  ASSERT_ARRAYS_EQUAL(expected, *result);
+  AssertArrayLikeEquivalent(datum_out, expected);
 }
 
 template <typename Type, typename T>
@@ -652,11 +649,11 @@ TEST_F(TestHashKernel, ZeroLengthDictionaryEncode) {
   // ARROW-7008
   auto values = ArrayFromJSON(utf8(), "[]");
   ASSERT_OK_AND_ASSIGN(Datum datum_result, DictionaryEncode(values));
-
-  std::shared_ptr<Array> result = datum_result.make_array();
-  const auto& dict_result = checked_cast<const DictionaryArray&>(*result);
-  ASSERT_OK(dict_result.Validate());
-  ASSERT_OK(dict_result.ValidateFull());
+  if (datum_result.kind() == Datum::ARRAY) {
+    ASSERT_OK(datum_result.make_array()->ValidateFull());
+  } else {
+    ASSERT_OK(datum_result.chunked_array()->ValidateFull());
+  }
 }
 
 TEST_F(TestHashKernel, ChunkedArrayZeroChunk) {

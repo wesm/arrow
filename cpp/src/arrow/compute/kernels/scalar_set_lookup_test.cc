@@ -668,8 +668,7 @@ TEST_F(TestMatchKernel, BinaryResizeTable) {
   ASSERT_OK(expected_builder.Finish(&expected));
 
   ASSERT_OK_AND_ASSIGN(Datum actual_datum, Match(haystack, needles));
-  std::shared_ptr<Array> actual = actual_datum.make_array();
-  ASSERT_ARRAYS_EQUAL(*expected, *actual);
+  AssertArrayLikeEquivalent(actual_datum, expected);
 }
 
 TEST_F(TestMatchKernel, MatchFixedSizeBinary) {

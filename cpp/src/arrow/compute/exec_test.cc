@@ -55,9 +55,9 @@ TEST(ExecContext, BasicWorkings) {
     ExecContext ctx;
     ASSERT_EQ(GetFunctionRegistry(), ctx.func_registry());
     ASSERT_EQ(default_memory_pool(), ctx.memory_pool());
-    ASSERT_EQ(std::numeric_limits<int64_t>::max(), ctx.exec_chunksize());
+    ASSERT_EQ(kDefaultExecChunksize, ctx.exec_chunksize());
 
-    ASSERT_TRUE(ctx.use_threads());
+    ASSERT_FALSE(ctx.use_threads());
     ASSERT_EQ(internal::CpuInfo::GetInstance(), ctx.cpu_info());
   }
 

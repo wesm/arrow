@@ -164,6 +164,12 @@ ARROW_TESTING_EXPORT void AssertArraysEqual(const Array& expected, const Array& 
 ARROW_TESTING_EXPORT void AssertArraysApproxEqual(const Array& expected,
                                                   const Array& actual,
                                                   bool verbose = false);
+
+// Datum can contain either Array or ChunkedArray
+ARROW_TESTING_EXPORT
+void AssertArrayLikeEquivalent(const Datum& result,
+                               const std::shared_ptr<Array>& expected);
+
 // Returns true when values are both null
 ARROW_TESTING_EXPORT void AssertScalarsEqual(const Scalar& expected, const Scalar& actual,
                                              bool verbose = false);

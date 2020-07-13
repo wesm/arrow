@@ -118,6 +118,21 @@ void AssertArraysApproxEqual(const Array& expected, const Array& actual, bool ve
       });
 }
 
+void AssertArrayLikeEquivalent(const Datum& result,
+                               const std::shared_ptr<Array>& expected) {
+  if (result.kind() == Datum::ARRAY) {
+    std::shared_ptr<Array> result_arr = result.make_array();
+    ASSERT_OK(result_arr->ValidateFull());
+    AssertArraysEqual(*expected, *result_arr, /*verbose=*/true);
+  } else {
+    DCHECK_EQ(result.kind(), Datum::CHUNKED_ARRAY);
+    auto chunked_expected = *ChunkedArray::Make({expected});
+    auto chunked_result = result.chunked_array();
+    ASSERT_OK(chunked_result->ValidateFull());
+    AssertChunkedEquivalent(*chunked_expected, *chunked_result);
+  }
+}
+
 void AssertScalarsEqual(const Scalar& expected, const Scalar& actual, bool verbose) {
   std::stringstream diff;
   // ARROW-8956, ScalarEquals returns false when both are null

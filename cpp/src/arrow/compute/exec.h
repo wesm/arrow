@@ -114,9 +114,9 @@ class ARROW_EXPORT ExecContext {
  private:
   MemoryPool* pool_;
   FunctionRegistry* func_registry_;
-  int64_t exec_chunksize_ = std::numeric_limits<int64_t>::max();
+  int64_t exec_chunksize_ = kDefaultExecChunksize;
   bool preallocate_contiguous_ = true;
-  bool use_threads_ = true;
+  bool use_threads_ = false;
 };
 
 // TODO: Consider standardizing on uint16 selection vectors and only use them

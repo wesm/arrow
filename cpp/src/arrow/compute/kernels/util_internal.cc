@@ -57,10 +57,11 @@ PrimitiveArg GetPrimitiveArg(const ArrayData& arr) {
   return arg;
 }
 
+// TODO(wesm): ARROW-16577: this will be unneeded later
 ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(ScalarKernel::ExecFunc exec,
                                                       NullHandling::type null_handling) {
   return [=](KernelContext* ctx, const ExecSpan& span, ExecResult* out) -> Status {
-    if (out->is_array()) {
+    if (!out->is_scalar()) {
       return exec(ctx, span, out);
     }
 
@@ -69,17 +70,19 @@ ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(ScalarKernel::ExecFunc exe
       return Status::OK();
     }
 
-    ARROW_ASSIGN_OR_RAISE(Datum array_in, MakeArrayFromScalar(*span[0].scalar, 1));
+    ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> array_in,
+                          MakeArrayFromScalar(*span[0].scalar, 1));
     ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> array_out,
                           MakeArrayFromScalar(*out->scalar(), 1));
 
-    ExecValue value;
-    value.array.SetMembers(*array_in.array());
     ExecResult array_result;
-    array_result.value = array_out->scalar();
-    RETURN_NOT_OK(exec(ctx, ExecSpan({value}, 1), &result));
+    array_result.value = array_out->data();
 
-    ARROW_ASSIGN_OR_RAISE(*out, array_out.make_array()->GetScalar(0));
+    ExecSpan span_with_arrays;
+    span_with_arrays.length = 1;
+    span_with_arrays.values = {ExecValue(*array_in->data())};
+    RETURN_NOT_OK(exec(ctx, span_with_arrays, &array_result));
+    ARROW_ASSIGN_OR_RAISE(out->value, MakeArray(array_result.array_data())->GetScalar(0));
     return Status::OK();
   };
 }

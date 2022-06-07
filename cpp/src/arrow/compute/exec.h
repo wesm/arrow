@@ -266,6 +266,11 @@ struct ExecValue {
   ExecValue(ArraySpan array)  // NOLINT implicit conversion
       : kind(ARRAY), array(std::move(array)) {}
 
+  ExecValue(const ArrayData& array)  // NOLINT implicit conversion
+      : kind(ARRAY) {
+    this->array.SetMembers(array);
+  }
+
   ExecValue() = default;
   ExecValue(const ExecValue& other) = default;
   ExecValue& operator=(const ExecValue& other) = default;

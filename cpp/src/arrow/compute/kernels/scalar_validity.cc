@@ -43,7 +43,8 @@ struct IsValidOperator {
     ArraySpan* out_span = out->array_span();
     if (arr.type->id() == Type::NA) {
       // Input is all nulls => output is entirely false.
-      bit_util::SetBitsTo(out_span->buffers[1].data, out->offset, out->length, false);
+      bit_util::SetBitsTo(out_span->buffers[1].data, out_span->offset, out_span->length,
+                          false);
       return Status::OK();
     }
 
@@ -125,7 +126,7 @@ struct IsNullOperator {
     uint8_t* out_bitmap = out_span->buffers[1].data;
     if (arr.GetNullCount() > 0) {
       // Input has nulls => output is the inverted null (validity) bitmap.
-      InvertBitmap(arr.buffers[0]->data(), arr.offset, arr.length, out_bitmap,
+      InvertBitmap(arr.buffers[0].data, arr.offset, arr.length, out_bitmap,
                    out_span->offset);
     } else {
       // Input has no nulls => output is entirely false.
@@ -212,7 +213,7 @@ Status ConstBoolExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out)
     checked_cast<BooleanScalar*>(out->scalar().get())->value = kConstant;
     return Status::OK();
   }
-  ArraySpan* array = &out->array;
+  ArraySpan* array = out->array_span();
   bit_util::SetBitsTo(array->buffers[1].data, array->offset, array->length, kConstant);
   return Status::OK();
 }
@@ -282,7 +283,7 @@ Status IsNullExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
       out->value = std::make_shared<BooleanScalar>(true);
     } else {
       // Data is preallocated
-      ArraySpan* out_arr = out->array;
+      ArraySpan* out_arr = out->array_span();
       bit_util::SetBitsTo(out_arr->buffers[1].data, out_arr->offset, out_arr->length,
                           true);
     }

@@ -629,6 +629,13 @@ struct VectorKernel : public Kernel {
   NullHandling::type null_handling = NullHandling::COMPUTED_NO_PREALLOCATE;
   MemAllocation::type mem_allocation = MemAllocation::NO_PREALLOCATE;
 
+  /// \brief Writing execution results into larger contiguous allocations
+  /// requires that the kernel be able to write into sliced output ArrayData*,
+  /// including sliced output validity bitmaps. Some kernel implementations may
+  /// not be able to do this, so setting this to false disables this
+  /// functionality.
+  bool can_write_into_slices = true;
+
   /// Some vector kernels can do chunkwise execution using ExecBatchIterator,
   /// in some cases accumulating some state. Other kernels (like Take) need to
   /// be passed whole arrays and don't work on ChunkedArray inputs

@@ -1398,6 +1398,39 @@ ScalarKernel::ExecFunc ArithmeticExecFromOp(detail::GetTypeId get_id) {
   }
 }
 
+// ARROW-16756: temporarily duplicated until we get all the kernels
+// migrated to the new API
+template <template <typename...> class KernelGenerator, typename Op, typename... Args>
+KernelBatchExec ArithmeticExecFromOpOld(detail::GetTypeId get_id) {
+  switch (get_id.id) {
+    case Type::INT8:
+      return KernelGenerator<Int8Type, Int8Type, Op, Args...>::Exec;
+    case Type::UINT8:
+      return KernelGenerator<UInt8Type, UInt8Type, Op, Args...>::Exec;
+    case Type::INT16:
+      return KernelGenerator<Int16Type, Int16Type, Op, Args...>::Exec;
+    case Type::UINT16:
+      return KernelGenerator<UInt16Type, UInt16Type, Op, Args...>::Exec;
+    case Type::INT32:
+      return KernelGenerator<Int32Type, Int32Type, Op, Args...>::Exec;
+    case Type::UINT32:
+      return KernelGenerator<UInt32Type, UInt32Type, Op, Args...>::Exec;
+    case Type::DURATION:
+    case Type::INT64:
+    case Type::TIMESTAMP:
+      return KernelGenerator<Int64Type, Int64Type, Op, Args...>::Exec;
+    case Type::UINT64:
+      return KernelGenerator<UInt64Type, UInt64Type, Op, Args...>::Exec;
+    case Type::FLOAT:
+      return KernelGenerator<FloatType, FloatType, Op, Args...>::Exec;
+    case Type::DOUBLE:
+      return KernelGenerator<DoubleType, DoubleType, Op, Args...>::Exec;
+    default:
+      DCHECK(false);
+      return ExecFailOld;
+  }
+}
+
 template <template <typename... Args> class Generator, typename... Args>
 ScalarKernel::ExecFunc GeneratePhysicalNumeric(detail::GetTypeId get_id) {
   switch (get_id.id) {
@@ -1511,6 +1544,44 @@ ScalarKernel::ExecFunc GenerateTypeAgnosticPrimitive(detail::GetTypeId get_id) {
   }
 }
 
+// XXX: Duplicated temporarily
+template <template <typename...> class Generator, typename... Args>
+KernelBatchExec GenerateTypeAgnosticPrimitiveOld(detail::GetTypeId get_id) {
+  switch (get_id.id) {
+    case Type::NA:
+      return Generator<NullType, Args...>::Exec;
+    case Type::BOOL:
+      return Generator<BooleanType, Args...>::Exec;
+    case Type::UINT8:
+    case Type::INT8:
+      return Generator<UInt8Type, Args...>::Exec;
+    case Type::UINT16:
+    case Type::INT16:
+      return Generator<UInt16Type, Args...>::Exec;
+    case Type::UINT32:
+    case Type::INT32:
+    case Type::FLOAT:
+    case Type::DATE32:
+    case Type::TIME32:
+    case Type::INTERVAL_MONTHS:
+      return Generator<UInt32Type, Args...>::Exec;
+    case Type::UINT64:
+    case Type::INT64:
+    case Type::DOUBLE:
+    case Type::DATE64:
+    case Type::TIMESTAMP:
+    case Type::TIME64:
+    case Type::DURATION:
+    case Type::INTERVAL_DAY_TIME:
+      return Generator<UInt64Type, Args...>::Exec;
+    case Type::INTERVAL_MONTH_DAY_NANO:
+      return Generator<MonthDayNanoIntervalType, Args...>::Exec;
+    default:
+      DCHECK(false);
+      return ExecFailOld;
+  }
+}
+
 // similar to GenerateTypeAgnosticPrimitive, but for base variable binary types
 template <template <typename...> class Generator, typename... Args>
 ScalarKernel::ExecFunc GenerateTypeAgnosticVarBinaryBase(detail::GetTypeId get_id) {
@@ -1524,6 +1595,22 @@ ScalarKernel::ExecFunc GenerateTypeAgnosticVarBinaryBase(detail::GetTypeId get_i
     default:
       DCHECK(false);
       return ExecFail;
+  }
+}
+
+// XXX: Duplicated temporarily
+template <template <typename...> class Generator, typename... Args>
+KernelBatchExec GenerateTypeAgnosticVarBinaryBaseOld(detail::GetTypeId get_id) {
+  switch (get_id.id) {
+    case Type::BINARY:
+    case Type::STRING:
+      return Generator<BinaryType, Args...>::Exec;
+    case Type::LARGE_BINARY:
+    case Type::LARGE_STRING:
+      return Generator<LargeBinaryType, Args...>::Exec;
+    default:
+      DCHECK(false);
+      return ExecFailOld;
   }
 }
 

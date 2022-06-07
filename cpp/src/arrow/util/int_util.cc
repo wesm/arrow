@@ -617,7 +617,7 @@ Status IntegersInRange(const Datum& datum, CType bound_lower, CType bound_upper)
                            FormatInt(bound_upper));
   };
 
-  if (datum.kind() == Datum::SCALAR) {
+  if (datum.is_scalar()) {
     const auto& scalar = datum.scalar_as<typename TypeTraits<InType>::ScalarType>();
     if (IsOutOfBoundsMaybeNull(scalar.value, scalar.is_valid)) {
       return GetErrorMessage(scalar.value);

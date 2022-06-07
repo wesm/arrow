@@ -31,21 +31,19 @@ namespace internal {
 namespace {
 
 template <typename Type, typename offset_type = typename Type::offset_type>
-Status ListValueLength(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status ListValueLength(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   using ScalarType = typename TypeTraits<Type>::ScalarType;
   using OffsetScalarType = typename TypeTraits<Type>::OffsetScalarType;
 
-  if (batch[0].kind() == Datum::ARRAY) {
-    typename TypeTraits<Type>::ArrayType list(batch[0].array());
-    ArrayData* out_arr = out->mutable_array();
-    auto out_values = out_arr->GetMutableValues<offset_type>(1);
-    const offset_type* offsets = list.raw_value_offsets();
-    ::arrow::internal::VisitBitBlocksVoid(
-        list.data()->buffers[0], list.offset(), list.length(),
-        [&](int64_t position) {
-          *out_values++ = offsets[position + 1] - offsets[position];
-        },
-        [&]() { *out_values++ = 0; });
+  if (batch[0].is_array()) {
+    const ArraySpan& arr = batch[0].array;
+    ArraySpan* out_arr = out->array_span();
+    auto out_values = out_arr->GetValues<offset_type>(1);
+    const offset_type* offsets = arr.GetValues<offset_type>(1);
+    // Offsets are always well-defined and monotonic, even for null values
+    for (int64_t i = 0; i < arr.length; ++i) {
+      *out_values++ = offsets[i + 1] - offsets[i];
+    }
   } else {
     const auto& arg0 = batch[0].scalar_as<ScalarType>();
     if (arg0.is_valid) {
@@ -57,12 +55,13 @@ Status ListValueLength(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
   return Status::OK();
 }
 
-Status FixedSizeListValueLength(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status FixedSizeListValueLength(KernelContext* ctx, const ExecSpan& batch,
+                                ExecResult* out) {
   auto width = checked_cast<const FixedSizeListType&>(*batch[0].type()).list_size();
-  if (batch[0].kind() == Datum::ARRAY) {
-    const auto& arr = *batch[0].array();
-    ArrayData* out_arr = out->mutable_array();
-    auto* out_values = out_arr->GetMutableValues<int32_t>(1);
+  if (batch[0].is_array()) {
+    const ArraySpan& arr = batch[0].array;
+    ArraySpan* out_arr = out->array_span();
+    int32_t* out_values = out_arr->GetValues<int32_t>(1);
     std::fill(out_values, out_values + arr.length, width);
   } else {
     const auto& arg0 = batch[0].scalar_as<FixedSizeListScalar>();
@@ -83,34 +82,43 @@ const FunctionDoc list_value_length_doc{
 
 template <typename Type, typename IndexType>
 struct ListElementArray {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
-    using ListArrayType = typename TypeTraits<Type>::ArrayType;
-    using IndexScalarType = typename TypeTraits<IndexType>::ScalarType;
+  using ListArrayType = typename TypeTraits<Type>::ArrayType;
+  using IndexScalarType = typename TypeTraits<IndexType>::ScalarType;
+  using offset_type = typename Type::offset_type;
+
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& index_scalar = batch[1].scalar_as<IndexScalarType>();
     if (ARROW_PREDICT_FALSE(!index_scalar.is_valid)) {
       return Status::Invalid("Index must not be null");
     }
-    ListArrayType list_array(batch[0].array());
+    const ArraySpan& list = batch[0].array;
+    const ArraySpan& list_values = list.child_data[0];
+    const offset_type* offsets = list.GetValues<offset_type>(1);
+
     auto index = index_scalar.value;
     if (ARROW_PREDICT_FALSE(index < 0)) {
       return Status::Invalid("Index ", index,
                              " is out of bounds: should be greater than or equal to 0");
     }
     std::unique_ptr<ArrayBuilder> builder;
-    RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), list_array.value_type(), &builder));
-    RETURN_NOT_OK(builder->Reserve(list_array.length()));
-    for (int i = 0; i < list_array.length(); ++i) {
-      if (list_array.IsNull(i)) {
+
+    const Type* list_type = checked_cast<const Type*>(list.type);
+    RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), list_type->value_type(), &builder));
+    RETURN_NOT_OK(builder->Reserve(list.length));
+    for (int i = 0; i < list.length; ++i) {
+      if (list.IsNull(i)) {
         RETURN_NOT_OK(builder->AppendNull());
         continue;
       }
-      std::shared_ptr<arrow::Array> value_array = list_array.value_slice(i);
-      auto len = value_array->length();
-      if (ARROW_PREDICT_FALSE(index >= static_cast<typename IndexType::c_type>(len))) {
+
+      const offset_type value_offset = offsets[i];
+      const offset_type value_length = offsets[i + 1] - offsets[i];
+      if (ARROW_PREDICT_FALSE(index >=
+                              static_cast<typename IndexType::c_type>(value_length))) {
         return Status::Invalid("Index ", index, " is out of bounds: should be in [0, ",
                                len, ")");
       }
-      RETURN_NOT_OK(builder->AppendArraySlice(*value_array->data(), index, 1));
+      RETURN_NOT_OK(builder->AppendArraySlice(list_values, value_offset + index, 1));
     }
     ARROW_ASSIGN_OR_RAISE(auto result, builder->Finish());
     out->value = result->data();
@@ -120,7 +128,7 @@ struct ListElementArray {
 
 template <typename, typename IndexType>
 struct ListElementScalar {
-  static Status Exec(KernelContext* /*ctx*/, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* /*ctx*/, const ExecSpan& batch, ExecResult* out) {
     using IndexScalarType = typename TypeTraits<IndexType>::ScalarType;
     const auto& index_scalar = batch[1].scalar_as<IndexScalarType>();
     if (ARROW_PREDICT_FALSE(!index_scalar.is_valid)) {
@@ -190,9 +198,10 @@ const FunctionDoc list_element_doc(
     {"lists", "index"});
 
 struct StructFieldFunctor {
-  static Status ExecArray(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status ExecArray(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = OptionsWrapper<StructFieldOptions>::Get(ctx);
-    std::shared_ptr<Array> current = batch[0].make_array();
+
+    std::shared_ptr<Array> current = batch[0].array.ToArrayData()->make_array();
     for (const auto& index : options.indices) {
       RETURN_NOT_OK(CheckIndex(index, *current->type()));
       switch (current->type()->id()) {
@@ -243,43 +252,44 @@ struct StructFieldFunctor {
                                    *current->type());
       }
     }
-    *out = current;
+    out->value = std::move(current->data());
     return Status::OK();
   }
 
-  static Status ExecScalar(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status ExecScalar(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = OptionsWrapper<StructFieldOptions>::Get(ctx);
-    const std::shared_ptr<Scalar>* current = &batch[0].scalar();
+    const Scalar* current = batch[0].scalar;
     for (const auto& index : options.indices) {
-      RETURN_NOT_OK(CheckIndex(index, *(*current)->type));
-      if (!(*current)->is_valid) {
+      RETURN_NOT_OK(CheckIndex(index, *current->type));
+      if (!current->is_valid) {
         // out should already be a null scalar of the appropriate type
         return Status::OK();
       }
 
-      switch ((*current)->type->id()) {
+      switch (current->type->id()) {
         case Type::STRUCT: {
-          current = &checked_cast<const StructScalar&>(**current).value[index];
+          current = checked_cast<const StructScalar&>(*current).value[index].get();
           break;
         }
         case Type::DENSE_UNION:
         case Type::SPARSE_UNION: {
-          const auto& union_scalar = checked_cast<const UnionScalar&>(**current);
-          const auto& union_ty = checked_cast<const UnionType&>(*(*current)->type);
+          const auto& union_scalar = checked_cast<const UnionScalar&>(*current);
+          const auto& union_ty = checked_cast<const UnionType&>(*current->type);
           if (union_scalar.type_code != union_ty.type_codes()[index]) {
             // out should already be a null scalar of the appropriate type
             return Status::OK();
           }
-          current = &union_scalar.value;
+          current = union_scalar.value.get();
           break;
         }
         default:
           // Should have been checked in ResolveStructFieldType
           return Status::TypeError("struct_field: cannot reference child field of type ",
-                                   *(*current)->type);
+                                   *current->type);
       }
     }
-    *out = *current;
+    // XXX: Revisit the above to see if we can avoid shared_from_this
+    out->value = current->GetSharedPtr();
     return Status::OK();
   }
 
@@ -386,7 +396,7 @@ Result<ValueDescr> MakeStructResolve(KernelContext* ctx,
   return ValueDescr{struct_(std::move(fields)), shape};
 }
 
-Status MakeStructExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status MakeStructExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   ARROW_ASSIGN_OR_RAISE(auto descr, MakeStructResolve(ctx, batch.GetDescriptors()));
 
   for (int i = 0; i < batch.num_values(); ++i) {
@@ -398,10 +408,11 @@ Status MakeStructExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
     }
   }
 
+  /// TODO: remove this scalar output modality altogether
   if (descr.shape == ValueDescr::SCALAR) {
     ScalarVector scalars(batch.num_values());
     for (int i = 0; i < batch.num_values(); ++i) {
-      scalars[i] = batch[i].scalar();
+      scalars[i] = batch[i].scalar->GetSharedPtr();
     }
 
     *out =
@@ -412,11 +423,11 @@ Status MakeStructExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
   ArrayVector arrays(batch.num_values());
   for (int i = 0; i < batch.num_values(); ++i) {
     if (batch[i].is_array()) {
-      arrays[i] = batch[i].make_array();
+      arrays[i] = batch[i].array.ToArrayData().make_array();
       continue;
     }
 
-    ARROW_ASSIGN_OR_RAISE(arrays[i], MakeArrayFromScalar(*batch[i].scalar(), batch.length,
+    ARROW_ASSIGN_OR_RAISE(arrays[i], MakeArrayFromScalar(*batch[i].scalar, batch.length,
                                                          ctx->memory_pool()));
   }
 
@@ -472,11 +483,11 @@ struct MapLookupFunctor {
     return Status::OK();
   }
 
-  static Status ExecMapArray(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status ExecMapArray(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = OptionsWrapper<MapLookupOptions>::Get(ctx);
     const auto& query_key = options.query_key;
     const auto& occurrence = options.occurrence;
-    const MapArray map_array(batch[0].array());
+    const MapArray map_array(batch[0].array.ToArrayData());
 
     std::unique_ptr<ArrayBuilder> builder;
     if (occurrence == MapLookupOptions::Occurrence::ALL) {
@@ -508,7 +519,7 @@ struct MapLookupFunctor {
         }
       }
       ARROW_ASSIGN_OR_RAISE(auto result, list_builder->Finish());
-      out->value = result->data();
+      out->value = std::move(result->data());
     } else { /* occurrence == FIRST || LAST */
       RETURN_NOT_OK(
           MakeBuilder(ctx->memory_pool(), map_array.map_type()->item_type(), &builder));
@@ -534,13 +545,15 @@ struct MapLookupFunctor {
         }
       }
       ARROW_ASSIGN_OR_RAISE(auto result, builder->Finish());
-      out->value = result->data();
+      out->value = std::move(result->data());
     }
 
     return Status::OK();
   }
 
-  static Status ExecMapScalar(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  /// TODO: use array path for scalars to avoid having to maintain two code paths
+  static Status ExecMapScalar(KernelContext* ctx, const ExecSpan& batch,
+                              ExecResult* out) {
     const auto& options = OptionsWrapper<MapLookupOptions>::Get(ctx);
     const auto& query_key = options.query_key;
     const auto& occurrence = options.occurrence;
@@ -620,12 +633,12 @@ Result<ValueDescr> ResolveMapLookupType(KernelContext* ctx,
 
 struct ResolveMapLookup {
   KernelContext* ctx;
-  const ExecBatch& batch;
-  Datum* out;
+  const ExecSpan& batch;
+  ExecResult* out;
 
   template <typename KeyType>
   Status Execute() {
-    if (batch[0].kind() == Datum::SCALAR) {
+    if (batch[0].is_scalar()) {
       return MapLookupFunctor<KeyType>::ExecMapScalar(ctx, batch, out);
     }
     return MapLookupFunctor<KeyType>::ExecMapArray(ctx, batch, out);
@@ -661,7 +674,7 @@ struct ResolveMapLookup {
     return Status::TypeError("Got unsupported type: ", type.ToString());
   }
 
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     ResolveMapLookup visitor{ctx, batch, out};
     return VisitTypeInline(*checked_cast<const MapType&>(*batch[0].type()).key_type(),
                            &visitor);

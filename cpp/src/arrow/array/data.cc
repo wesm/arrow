@@ -129,6 +129,85 @@ int64_t ArrayData::GetNullCount() const {
 }
 
 // ----------------------------------------------------------------------
+// Methods for ArraySpan
+
+void ArraySpan::SetMembers(const ArrayData& data) {
+  this->type = data.type.get();
+  this->length = data.length;
+  this->null_count = data.null_count.load();
+  this->offset = data.offset;
+
+  for (size_t i = 0; i < data.buffers.size(); ++i) {
+    const std::shared_ptr<Buffer>& buffer = data.buffers[i];
+    // It is the invoker-of-kernels's responsibility to ensure that
+    // const buffers are not written to accidentally.
+    if (buffer) {
+      this->buffers[i].data = const_cast<uint8_t*>(buffer->data());
+      this->buffers[i].length = buffer->size();
+      this->buffers[i].owner = &buffer;
+    } else {
+      this->buffers[i].data = nullptr;
+      this->buffers[i].length = 0;
+      this->buffers[i].owner = nullptr;
+    }
+  }
+
+  // Makes sure any other buffers are seen as null / non-existent
+  for (size_t i = data.buffers.size(); i < 3; ++i) {
+    this->buffers[i].data = nullptr;
+    this->buffers[i].length = 0;
+    this->buffers[i].owner = nullptr;
+  }
+
+  if (this->type->id() == Type::DICTIONARY) {
+    this->child_data.resize(1);
+    this->child_data[0].SetMembers(*data.dictionary);
+  } else if (data.child_data.size() > 0) {
+    this->child_data.resize(data.child_data.size());
+    for (size_t child_index = 0; child_index < data.child_data.size(); ++child_index) {
+      this->child_data[child_index].SetMembers(*data.child_data[child_index]);
+    }
+  }
+}
+
+int64_t ArraySpan::GetNullCount() const {
+  int64_t precomputed = this->null_count;
+  if (ARROW_PREDICT_FALSE(precomputed == kUnknownNullCount)) {
+    if (this->buffers[0].data != nullptr) {
+      precomputed =
+          this->length - CountSetBits(this->buffers[0].data, this->offset, this->length);
+    } else {
+      precomputed = 0;
+    }
+    this->null_count = precomputed;
+  }
+  return precomputed;
+}
+
+std::shared_ptr<ArrayData> ArraySpan::ToArrayData() const {
+  auto result =
+      std::make_shared<ArrayData>(const_cast<DataType*>(this->type)->shared_from_this(),
+                                  this->length, kUnknownNullCount, this->offset);
+  for (int i = 0; i < 3; ++i) {
+    if (!buffers[i].owner) {
+      /// XXX there is risk of yielding a malformed buffer, but this
+      /// minimal implementation will suffice for now
+      break;
+    }
+    result->buffers.push_back(this->GetBuffer(i));
+  }
+  if (this->type->id() == Type::DICTIONARY) {
+    result->dictionary = this->dictionary().ToArrayData();
+  } else {
+    // Emit children, too
+    for (size_t i = 0; i < this->child_data.size(); ++i) {
+      result->child_data.push_back(this->child_data[i].ToArrayData());
+    }
+  }
+  return result;
+}
+
+// ----------------------------------------------------------------------
 // Implement ArrayData::View
 
 namespace {

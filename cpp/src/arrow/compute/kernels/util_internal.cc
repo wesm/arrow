@@ -57,21 +57,28 @@ PrimitiveArg GetPrimitiveArg(const ArrayData& arr) {
   return arg;
 }
 
-ArrayKernelExec TrivialScalarUnaryAsArraysExec(ArrayKernelExec exec,
-                                               NullHandling::type null_handling) {
-  return [=](KernelContext* ctx, const ExecBatch& batch, Datum* out) -> Status {
+ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(ScalarKernel::ExecFunc exec,
+                                                      NullHandling::type null_handling) {
+  return [=](KernelContext* ctx, const ExecSpan& span, ExecResult* out) -> Status {
     if (out->is_array()) {
-      return exec(ctx, batch, out);
+      return exec(ctx, span, out);
     }
 
-    if (null_handling == NullHandling::INTERSECTION && !batch[0].scalar()->is_valid) {
+    if (null_handling == NullHandling::INTERSECTION && !span[0].scalar->is_valid) {
       out->scalar()->is_valid = false;
       return Status::OK();
     }
 
-    ARROW_ASSIGN_OR_RAISE(Datum array_in, MakeArrayFromScalar(*batch[0].scalar(), 1));
-    ARROW_ASSIGN_OR_RAISE(Datum array_out, MakeArrayFromScalar(*out->scalar(), 1));
-    RETURN_NOT_OK(exec(ctx, ExecBatch{{std::move(array_in)}, 1}, &array_out));
+    ARROW_ASSIGN_OR_RAISE(Datum array_in, MakeArrayFromScalar(*span[0].scalar, 1));
+    ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> array_out,
+                          MakeArrayFromScalar(*out->scalar(), 1));
+
+    ExecValue value;
+    value.array.SetMembers(*array_in.array());
+    ExecResult array_result;
+    array_result.value = array_out->scalar();
+    RETURN_NOT_OK(exec(ctx, ExecSpan({value}, 1), &result));
+
     ARROW_ASSIGN_OR_RAISE(*out, array_out.make_array()->GetScalar(0));
     return Status::OK();
   };

@@ -2326,7 +2326,7 @@ Status TakeExec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
 
 struct SelectionKernelDescr {
   InputType input;
-  ArrayKernelExec exec;
+  KernelBatchExec exec;
 };
 
 void RegisterSelectionFunction(const std::string& name, FunctionDoc doc,
@@ -2382,9 +2382,9 @@ struct NonZeroVisitor {
     const T zero{};
     uint64_t index = 0;
 
-    for (const auto& current_array : arrays) {
+    for (const std::shared_ptr<ArrayData>& current_array : arrays) {
       VisitArrayValuesInline<Type>(
-          *current_array,
+          ArraySpan(*current_array),
           [&](T v) {
             if (v != zero) {
               this->builder->UnsafeAppend(index++);

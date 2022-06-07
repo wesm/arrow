@@ -36,16 +36,17 @@ using internal::ParseValue;
 namespace compute {
 namespace internal {
 
-Status CastIntegerToInteger(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status CastIntegerToInteger(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   const auto& options = checked_cast<const CastState*>(ctx->state())->options;
   if (!options.allow_int_overflow) {
-    RETURN_NOT_OK(IntegersCanFit(batch[0], *out->type()));
+    /// This uses Datum, should be refactored to use ArraySpan
+    RETURN_NOT_OK(IntegersCanFit(batch[0].array.ToArrayData(), *out->type()));
   }
   CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
   return Status::OK();
 }
 
-Status CastFloatingToFloating(KernelContext*, const ExecBatch& batch, Datum* out) {
+Status CastFloatingToFloating(KernelContext*, const ExecSpan& batch, ExecResult* out) {
   CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
   return Status::OK();
 }
@@ -57,7 +58,7 @@ Status CastFloatingToFloating(KernelContext*, const ExecBatch& batch, Datum* out
 template <typename InType, typename OutType, typename InT = typename InType::c_type,
           typename OutT = typename OutType::c_type>
 ARROW_DISABLE_UBSAN("float-cast-overflow")
-Status CheckFloatTruncation(const Datum& input, const Datum& output) {
+Status CheckFloatTruncation(const ExecValue& input, const ExecResult& output) {
   auto WasTruncated = [&](OutT out_val, InT in_val) -> bool {
     return static_cast<InT>(out_val) != in_val;
   };
@@ -69,26 +70,24 @@ Status CheckFloatTruncation(const Datum& input, const Datum& output) {
                            *output.type());
   };
 
-  if (input.kind() == Datum::SCALAR) {
-    DCHECK_EQ(output.kind(), Datum::SCALAR);
+  if (input.is_scalar()) {
+    DCHECK(output.is_scalar());
     const auto& in_scalar = input.scalar_as<typename TypeTraits<InType>::ScalarType>();
-    const auto& out_scalar = output.scalar_as<typename TypeTraits<OutType>::ScalarType>();
+    const auto& out_scalar =
+        checked_cast<typename TypeTraits<OutType>::ScalarType&>(*output.scalar());
     if (WasTruncatedMaybeNull(out_scalar.value, in_scalar.value, out_scalar.is_valid)) {
       return GetErrorMessage(in_scalar.value);
     }
     return Status::OK();
   }
 
-  const ArrayData& in_array = *input.array();
-  const ArrayData& out_array = *output.array();
+  const ArraySpan& in_array = input.array;
+  const ArraySpan& out_array = *output.array_span();
 
   const InT* in_data = in_array.GetValues<InT>(1);
   const OutT* out_data = out_array.GetValues<OutT>(1);
 
-  const uint8_t* bitmap = nullptr;
-  if (in_array.buffers[0]) {
-    bitmap = in_array.buffers[0]->data();
-  }
+  const uint8_t* bitmap = in_array.buffers[0].data;
   OptionalBitBlockCounter bit_counter(bitmap, in_array.offset, in_array.length);
   int64_t position = 0;
   int64_t offset_position = in_array.offset;
@@ -132,7 +131,7 @@ Status CheckFloatTruncation(const Datum& input, const Datum& output) {
 }
 
 template <typename InType>
-Status CheckFloatToIntTruncationImpl(const Datum& input, const Datum& output) {
+Status CheckFloatToIntTruncationImpl(const ExecValue& input, const ExecResult& output) {
   switch (output.type()->id()) {
     case Type::INT8:
       return CheckFloatTruncation<InType, Int8Type>(input, output);
@@ -157,7 +156,7 @@ Status CheckFloatToIntTruncationImpl(const Datum& input, const Datum& output) {
   return Status::OK();
 }
 
-Status CheckFloatToIntTruncation(const Datum& input, const Datum& output) {
+Status CheckFloatToIntTruncation(const ExecValue& input, const ExecResult& output) {
   switch (input.type()->id()) {
     case Type::FLOAT:
       return CheckFloatToIntTruncationImpl<FloatType>(input, output);
@@ -170,7 +169,7 @@ Status CheckFloatToIntTruncation(const Datum& input, const Datum& output) {
   return Status::OK();
 }
 
-Status CastFloatingToInteger(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status CastFloatingToInteger(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   const auto& options = checked_cast<const CastState*>(ctx->state())->options;
   CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
   if (!options.allow_float_truncate) {
@@ -249,11 +248,13 @@ Status CheckForIntegerToFloatingTruncation(const Datum& input, Type::type out_ty
   return Status::OK();
 }
 
-Status CastIntegerToFloating(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status CastIntegerToFloating(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   const auto& options = checked_cast<const CastState*>(ctx->state())->options;
   Type::type out_type = out->type()->id();
   if (!options.allow_float_truncate) {
-    RETURN_NOT_OK(CheckForIntegerToFloatingTruncation(batch[0], out_type));
+    /// XXX: refactor to not use Datum
+    RETURN_NOT_OK(
+        CheckForIntegerToFloatingTruncation(batch[0].array.ToArrayData(), out_type));
   }
   CastNumberToNumberUnsafe(batch[0].type()->id(), out_type, batch[0], out);
   return Status::OK();
@@ -273,7 +274,7 @@ struct BooleanToNumber {
 
 template <typename O>
 struct CastFunctor<O, BooleanType, enable_if_number<O>> {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     return applicator::ScalarUnary<O, BooleanType, BooleanToNumber>::Exec(ctx, batch,
                                                                           out);
   }
@@ -297,7 +298,7 @@ struct ParseString {
 
 template <typename O, typename I>
 struct CastFunctor<O, I, enable_if_base_binary<I>> {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     return applicator::ScalarUnaryNotNull<O, I, ParseString<O>>::Exec(ctx, batch, out);
   }
 };
@@ -364,7 +365,7 @@ struct CastFunctor<O, I,
                    enable_if_t<is_integer_type<O>::value && is_decimal_type<I>::value>> {
   using out_type = typename O::c_type;
 
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = checked_cast<const CastState*>(ctx->state())->options;
 
     const auto& in_type_inst = checked_cast<const I&>(*batch[0].type());
@@ -411,7 +412,7 @@ struct IntegerToDecimal {
 template <typename O, typename I>
 struct CastFunctor<O, I,
                    enable_if_t<is_decimal_type<O>::value && is_integer_type<I>::value>> {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& out_type = checked_cast<const O&>(*out->type());
     const auto out_scale = out_type.scale();
     const auto out_precision = out_type.precision();
@@ -511,7 +512,7 @@ struct SafeRescaleDecimal {
 template <typename O, typename I>
 struct CastFunctor<O, I,
                    enable_if_t<is_decimal_type<O>::value && is_decimal_type<I>::value>> {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = checked_cast<const CastState*>(ctx->state())->options;
 
     const auto& in_type = checked_cast<const I&>(*batch[0].type());
@@ -565,7 +566,7 @@ struct RealToDecimal {
 template <typename O, typename I>
 struct CastFunctor<O, I,
                    enable_if_t<is_decimal_type<O>::value && is_floating_type<I>::value>> {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = checked_cast<const CastState*>(ctx->state())->options;
     const auto& out_type = checked_cast<const O&>(*out->type());
     const auto out_scale = out_type.scale();
@@ -592,7 +593,7 @@ struct DecimalToReal {
 template <typename O, typename I>
 struct CastFunctor<O, I,
                    enable_if_t<is_floating_type<O>::value && is_decimal_type<I>::value>> {
-  static Status Exec(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& in_type = checked_cast<const I&>(*batch[0].type());
     const auto in_scale = in_type.scale();
 

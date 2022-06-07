@@ -25,6 +25,7 @@
 
 #include "arrow/buffer.h"
 #include "arrow/result.h"
+#include "arrow/util/bit_util.h"
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
 
@@ -240,6 +241,96 @@ struct ARROW_EXPORT ArrayData {
 
   // The dictionary for this Array, if any. Only used for dictionary type
   std::shared_ptr<ArrayData> dictionary;
+};
+
+/// \brief A non-owning Buffer reference
+struct ARROW_EXPORT BufferRef {
+  // It is the user of this class's responsibility to ensure that
+  // buffers that were const originally are not written to
+  // accidentally.
+  uint8_t* data = NULLPTR;
+  int64_t length = 0;
+  // Pointer back to buffer that owns this memory
+  const std::shared_ptr<Buffer>* owner = NULLPTR;
+};
+
+/// \brief A non-owning ArrayData reference that is cheaply copyable
+/// and does not contain any shared_ptr objects
+struct ARROW_EXPORT ArraySpan {
+  const DataType* type;
+  int64_t length = 0;
+  mutable int64_t null_count = kUnknownNullCount;
+  int64_t offset = 0;
+  BufferRef buffers[3];
+
+  ArraySpan() = default;
+
+  explicit ArraySpan(const ArrayData& data) { SetMembers(data); }
+
+  /// If dictionary-encoded, put dictionary in the first entry
+  // TODO(wesm): would a std::unique_ptr<vector<...>> be better?
+  std::vector<ArraySpan> child_data;
+
+  void SetMembers(const ArrayData& data);
+
+  const ArraySpan& dictionary() const { return child_data[0]; }
+
+  // Access a buffer's data as a typed C pointer
+  template <typename T>
+  inline T* GetValues(int i, int64_t absolute_offset) {
+    return reinterpret_cast<T*>(buffers[i].data) + absolute_offset;
+  }
+
+  template <typename T>
+  inline T* GetValues(int i) {
+    return GetValues<T>(i, this->offset);
+  }
+
+  // Access a buffer's data as a typed C pointer
+  template <typename T>
+  inline const T* GetValues(int i, int64_t absolute_offset) const {
+    return reinterpret_cast<const T*>(buffers[i].data) + absolute_offset;
+  }
+
+  template <typename T>
+  inline const T* GetValues(int i) const {
+    return GetValues<T>(i, this->offset);
+  }
+
+  bool IsNull(int64_t i) const {
+    return ((this->buffers[0].data != NULLPTR)
+                ? !bit_util::GetBit(this->buffers[0].data, i + this->offset)
+                : this->null_count == this->length);
+  }
+
+  std::shared_ptr<ArrayData> ToArrayData() const;
+
+  std::shared_ptr<Buffer> GetBuffer(int index) const {
+    if (this->buffers[index].owner == NULLPTR) {
+      return NULLPTR;
+    } else {
+      return *this->buffers[index].owner;
+    }
+  }
+
+  void AddOffset(int64_t offset) {
+    this->offset += offset;
+    this->null_count = kUnknownNullCount;
+  }
+
+  void SetOffset(int64_t offset) {
+    this->offset = offset;
+    this->null_count = kUnknownNullCount;
+  }
+
+  /// \brief Return null count, or compute and set it if it's not known
+  int64_t GetNullCount() const;
+
+  bool MayHaveNulls() const {
+    // If an ArrayData is slightly malformed it may have kUnknownNullCount set
+    // but no buffer
+    return null_count != 0 && buffers[0].data != NULLPTR;
+  }
 };
 
 namespace internal {

@@ -832,7 +832,7 @@ struct FillNullBackwardFunctor {
 template <template <class> class Functor>
 void RegisterVectorFunction(FunctionRegistry* registry,
                             std::shared_ptr<VectorFunction> func) {
-  auto add_kernel = [&](detail::GetTypeId get_id, ArrayKernelExec exec) {
+  auto add_kernel = [&](detail::GetTypeId get_id, KernelBatchExec exec) {
     VectorKernel kernel;
     kernel.can_execute_chunkwise = false;
     if (is_fixed_width(get_id.id)) {

@@ -183,7 +183,7 @@ class ArrayPrinter : public PrettyPrinter {
 
   template <typename ArrayType, typename T = typename ArrayType::TypeClass>
   Status WritePrimitiveValues(const ArrayType& array) {
-    StringFormatter<T> formatter{array.type()};
+    StringFormatter<T> formatter{array.type().get()};
     return WritePrimitiveValues(array, &formatter);
   }
 
@@ -219,7 +219,7 @@ class ArrayPrinter : public PrettyPrinter {
 
   Status WriteDataValues(const HalfFloatArray& array) {
     // XXX do not know how to format half floats yet
-    StringFormatter<Int16Type> formatter{array.type()};
+    StringFormatter<Int16Type> formatter{array.type().get()};
     return WritePrimitiveValues(array, &formatter);
   }
 

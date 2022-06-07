@@ -56,7 +56,7 @@ random::pcg64_oneseq MakeSeedGenerator() {
   return seed_gen;
 }
 
-Status ExecRandom(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
+Status ExecRandom(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   static random::pcg64_oneseq seed_gen = MakeSeedGenerator();
   static std::mutex seed_gen_mutex;
 
@@ -66,23 +66,16 @@ Status ExecRandom(KernelContext* ctx, const ExecBatch& batch, Datum* out) {
     return Status::Invalid("Negative number of elements");
   }
 
-  auto out_data = ArrayData::Make(float64(), options.length, 0);
-  out_data->buffers.resize(2, nullptr);
-
-  ARROW_ASSIGN_OR_RAISE(out_data->buffers[1],
-                        ctx->Allocate(options.length * sizeof(double)));
-  double* out_buffer = out_data->template GetMutableValues<double>(1);
-
   if (options.initializer == RandomOptions::Seed) {
     gen.seed(options.seed);
   } else {
     std::lock_guard<std::mutex> seed_gen_lock(seed_gen_mutex);
     gen.seed(seed_gen());
   }
+  double* out_data = out->array_span()->GetValues<double>(1);
   for (int64_t i = 0; i < options.length; ++i) {
-    out_buffer[i] = generate_uniform(&gen);
+    out_data[i] = generate_uniform(&gen);
   }
-  *out = std::move(out_data);
   return Status::OK();
 }
 
@@ -103,7 +96,6 @@ void RegisterScalarRandom(FunctionRegistry* registry) {
   ScalarKernel kernel{
       {}, ValueDescr(float64(), ValueDescr::Shape::ARRAY), ExecRandom, RandomState::Init};
   kernel.null_handling = NullHandling::OUTPUT_NOT_NULL;
-  kernel.mem_allocation = MemAllocation::NO_PREALLOCATE;
   DCHECK_OK(random_func->AddKernel(kernel));
   DCHECK_OK(registry->AddFunction(std::move(random_func)));
 }

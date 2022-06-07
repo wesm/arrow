@@ -1296,8 +1296,8 @@ struct Strptime {
     bit_util::SetBitmap(out_span->buffers[0].data, out_span->offset, out_span->length);
     if (self.error_is_null) {
       int64_t null_count = 0;
-      arrow::internal::BitmapWriter out_writer(out_span->buffers[0].data, out_span->offset,
-                                               out_span->length);
+      arrow::internal::BitmapWriter out_writer(out_span->buffers[0].data,
+                                               out_span->offset, out_span->length);
       auto visit_null = [&]() {
         *out_data++ = 0;
         out_writer.Next();

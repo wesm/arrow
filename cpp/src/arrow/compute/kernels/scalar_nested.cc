@@ -116,7 +116,7 @@ struct ListElementArray {
       if (ARROW_PREDICT_FALSE(index >=
                               static_cast<typename IndexType::c_type>(value_length))) {
         return Status::Invalid("Index ", index, " is out of bounds: should be in [0, ",
-                               len, ")");
+                               value_length, ")");
       }
       RETURN_NOT_OK(builder->AppendArraySlice(list_values, value_offset + index, 1));
     }
@@ -201,7 +201,7 @@ struct StructFieldFunctor {
   static Status ExecArray(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = OptionsWrapper<StructFieldOptions>::Get(ctx);
 
-    std::shared_ptr<Array> current = batch[0].array.ToArrayData()->make_array();
+    std::shared_ptr<Array> current = MakeArray(batch[0].array.ToArrayData());
     for (const auto& index : options.indices) {
       RETURN_NOT_OK(CheckIndex(index, *current->type()));
       switch (current->type()->id()) {
@@ -414,24 +414,25 @@ Status MakeStructExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out
     for (int i = 0; i < batch.num_values(); ++i) {
       scalars[i] = batch[i].scalar->GetSharedPtr();
     }
-
-    *out =
-        Datum(std::make_shared<StructScalar>(std::move(scalars), std::move(descr.type)));
+    out->value =
+        std::make_shared<StructScalar>(std::move(scalars), std::move(descr.type));
     return Status::OK();
   }
 
-  ArrayVector arrays(batch.num_values());
+  ArrayData* out_data = out->array_data().get();
+  out_data->length = batch.length;
+  out_data->type = descr.type;
+  out_data->child_data.resize(batch.num_values());
   for (int i = 0; i < batch.num_values(); ++i) {
     if (batch[i].is_array()) {
-      arrays[i] = batch[i].array.ToArrayData().make_array();
-      continue;
+      out_data->child_data[i] = batch[i].array.ToArrayData();
+    } else {
+      ARROW_ASSIGN_OR_RAISE(
+          std::shared_ptr<Array> promoted,
+          MakeArrayFromScalar(*batch[i].scalar, batch.length, ctx->memory_pool()));
+      out_data->child_data[i] = promoted->data();
     }
-
-    ARROW_ASSIGN_OR_RAISE(arrays[i], MakeArrayFromScalar(*batch[i].scalar, batch.length,
-                                                         ctx->memory_pool()));
   }
-
-  *out = std::make_shared<StructArray>(descr.type, batch.length, std::move(arrays));
   return Status::OK();
 }
 
@@ -442,31 +443,29 @@ const FunctionDoc make_struct_doc{"Wrap Arrays into a StructArray",
                                   "MakeStructOptions"};
 template <typename KeyType>
 struct MapLookupFunctor {
-  static Result<int64_t> GetOneMatchingIndex(const Array& keys,
-                                             const Scalar& query_key_scalar,
-                                             const bool* from_back) {
+  using UnboxedKey = typename UnboxScalar<KeyType>::T;
+  static Result<int64_t> GetOneMatchingIndex(const ArraySpan& keys, UnboxedKey query_key,
+                                             const bool use_last) {
     int64_t match_index = -1;
-    RETURN_NOT_OK(
-        FindMatchingIndices(keys, query_key_scalar, [&](int64_t index) -> Status {
-          match_index = index;
-          if (*from_back) {
-            return Status::OK();
-          } else {
-            return Status::Cancelled("Found key match for FIRST");
-          }
-        }));
-
+    RETURN_NOT_OK(FindMatchingIndices(keys, query_key, [&](int64_t index) -> Status {
+      match_index = index;
+      if (use_last) {
+        return Status::OK();
+      } else {
+        // If use_last is false, then this will abort the loop
+        return Status::Cancelled("Found match, short-circuiting");
+      }
+    }));
     return match_index;
   }
 
   template <typename FoundItem>
-  static Status FindMatchingIndices(const Array& keys, const Scalar& query_key_scalar,
+  static Status FindMatchingIndices(const ArraySpan& keys, UnboxedKey query_key,
                                     FoundItem callback) {
-    const auto query_key = UnboxScalar<KeyType>::Unbox(query_key_scalar);
     int64_t index = 0;
     Status status = VisitArrayValuesInline<KeyType>(
-        *keys.data(),
-        [&](decltype(query_key) key) -> Status {
+        keys,
+        [&](UnboxedKey key) -> Status {
           if (key == query_key) {
             return callback(index++);
           }
@@ -485,61 +484,76 @@ struct MapLookupFunctor {
 
   static Status ExecMapArray(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const auto& options = OptionsWrapper<MapLookupOptions>::Get(ctx);
-    const auto& query_key = options.query_key;
-    const auto& occurrence = options.occurrence;
-    const MapArray map_array(batch[0].array.ToArrayData());
+    const UnboxedKey query_key = UnboxScalar<KeyType>::Unbox(*options.query_key);
+
+    const ArraySpan& map = batch[0].array;
+    const int32_t* offsets = map.GetValues<int32_t>(1);
+
+    // We create a copy of the keys array because we will adjust the
+    // offset and length for the map probes below
+    ArraySpan map_keys = map.child_data[0].child_data[0];
+    const ArraySpan& map_items = map.child_data[0].child_data[1];
+
+    std::shared_ptr<DataType> item_type =
+        checked_cast<const MapType*>(map.type)->item_type();
 
     std::unique_ptr<ArrayBuilder> builder;
-    if (occurrence == MapLookupOptions::Occurrence::ALL) {
-      RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(),
-                                list(map_array.map_type()->item_type()), &builder));
+    if (options.occurrence == MapLookupOptions::Occurrence::ALL) {
+      RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), list(item_type), &builder));
       auto list_builder = checked_cast<ListBuilder*>(builder.get());
       auto value_builder = list_builder->value_builder();
 
-      for (int64_t map_array_idx = 0; map_array_idx < map_array.length();
-           ++map_array_idx) {
-        if (!map_array.IsValid(map_array_idx)) {
+      for (int64_t map_index = 0; map_index < map.length; ++map_index) {
+        if (!map.IsValid(map_index)) {
           RETURN_NOT_OK(list_builder->AppendNull());
           continue;
         }
 
-        auto map = map_array.value_slice(map_array_idx);
-        auto keys = checked_cast<const StructArray&>(*map).field(0);
-        auto items = checked_cast<const StructArray&>(*map).field(1);
+        const int32_t item_offset = offsets[map_index];
+        const int32_t item_size = offsets[map_index + 1] - offsets[map_index];
+
+        // Adjust the keys view to just the map slot that we are about to search
+        map_keys.SetOffset(item_offset);
+        map_keys.length = item_size;
+
         bool found_at_least_one_key = false;
-        RETURN_NOT_OK(
-            FindMatchingIndices(*keys, *query_key, [&](int64_t index) -> Status {
-              if (!found_at_least_one_key) RETURN_NOT_OK(list_builder->Append(true));
-              found_at_least_one_key = true;
-              RETURN_NOT_OK(value_builder->AppendArraySlice(*items->data(), index, 1));
-              return Status::OK();
-            }));
+        RETURN_NOT_OK(FindMatchingIndices(map_keys, query_key, [&](int64_t key_index) {
+          if (!found_at_least_one_key) RETURN_NOT_OK(list_builder->Append(true));
+          found_at_least_one_key = true;
+          return value_builder->AppendArraySlice(map_items, item_offset + key_index, 1);
+        }));
+
         if (!found_at_least_one_key) {
+          // Key was not found in this map element, so we append a null list
           RETURN_NOT_OK(list_builder->AppendNull());
         }
       }
       ARROW_ASSIGN_OR_RAISE(auto result, list_builder->Finish());
       out->value = std::move(result->data());
     } else { /* occurrence == FIRST || LAST */
-      RETURN_NOT_OK(
-          MakeBuilder(ctx->memory_pool(), map_array.map_type()->item_type(), &builder));
+      RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), item_type, &builder));
       RETURN_NOT_OK(builder->Reserve(batch.length));
-      for (int64_t map_array_idx = 0; map_array_idx < map_array.length();
-           ++map_array_idx) {
-        if (!map_array.IsValid(map_array_idx)) {
+      for (int64_t map_index = 0; map_index < map.length; ++map_index) {
+        if (!map.IsValid(map_index)) {
           RETURN_NOT_OK(builder->AppendNull());
           continue;
         }
 
-        auto map = map_array.value_slice(map_array_idx);
-        auto keys = checked_cast<const StructArray&>(*map).field(0);
-        auto items = checked_cast<const StructArray&>(*map).field(1);
-        bool from_back = (occurrence == MapLookupOptions::LAST);
-        ARROW_ASSIGN_OR_RAISE(int64_t key_match_idx,
-                              GetOneMatchingIndex(*keys, *query_key, &from_back));
+        const int32_t item_offset = offsets[map_index];
+        const int32_t item_size = offsets[map_index + 1] - offsets[map_index];
 
-        if (key_match_idx != -1) {
-          RETURN_NOT_OK(builder->AppendArraySlice(*items->data(), key_match_idx, 1));
+        // Adjust the keys view to just the map slot that we are about to search
+        map_keys.SetOffset(item_offset);
+        map_keys.length = item_size;
+
+        ARROW_ASSIGN_OR_RAISE(
+            int64_t item_index,
+            GetOneMatchingIndex(map_keys, query_key,
+                                options.occurrence == MapLookupOptions::LAST));
+
+        if (item_index != -1) {
+          RETURN_NOT_OK(
+              builder->AppendArraySlice(map_items, item_offset + item_index, 1));
         } else {
           RETURN_NOT_OK(builder->AppendNull());
         }
@@ -547,19 +561,17 @@ struct MapLookupFunctor {
       ARROW_ASSIGN_OR_RAISE(auto result, builder->Finish());
       out->value = std::move(result->data());
     }
-
     return Status::OK();
   }
 
-  /// TODO: use array path for scalars to avoid having to maintain two code paths
+  /// TODO(ARROW-16577): use array path for scalars to avoid having to
+  /// maintain two code paths
   static Status ExecMapScalar(KernelContext* ctx, const ExecSpan& batch,
                               ExecResult* out) {
     const auto& options = OptionsWrapper<MapLookupOptions>::Get(ctx);
-    const auto& query_key = options.query_key;
-    const auto& occurrence = options.occurrence;
+    UnboxedKey query_key = UnboxScalar<KeyType>::Unbox(*options.query_key);
 
-    std::shared_ptr<DataType> item_type =
-        checked_cast<const MapType&>(*batch[0].type()).item_type();
+    const auto& item_type = checked_cast<const MapType*>(batch[0].type())->item_type();
     const auto& map_scalar = batch[0].scalar_as<MapScalar>();
 
     if (ARROW_PREDICT_FALSE(!map_scalar.is_valid)) {
@@ -572,34 +584,36 @@ struct MapLookupFunctor {
     }
 
     const auto& struct_array = checked_cast<const StructArray&>(*map_scalar.value);
-    const std::shared_ptr<Array> keys = struct_array.field(0);
-    const std::shared_ptr<Array> items = struct_array.field(1);
+    ArraySpan map_keys(*struct_array.data()->child_data[0]);
 
-    if (occurrence == MapLookupOptions::Occurrence::ALL) {
+    if (options.occurrence == MapLookupOptions::Occurrence::ALL) {
+      ArraySpan map_items(*struct_array.data()->child_data[1]);
+
       bool found_at_least_one_key = false;
       std::unique_ptr<ArrayBuilder> builder;
-      RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), items->type(), &builder));
-
-      RETURN_NOT_OK(FindMatchingIndices(*keys, *query_key, [&](int64_t index) -> Status {
-        found_at_least_one_key = true;
-        RETURN_NOT_OK(builder->AppendArraySlice(*items->data(), index, 1));
-        return Status::OK();
-      }));
+      RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), item_type, &builder));
+      RETURN_NOT_OK(
+          FindMatchingIndices(map_keys, query_key, [&](int64_t index) -> Status {
+            found_at_least_one_key = true;
+            RETURN_NOT_OK(builder->AppendArraySlice(map_items, index, 1));
+            return Status::OK();
+          }));
       if (!found_at_least_one_key) {
-        out->value = MakeNullScalar(list(items->type()));
+        out->value = MakeNullScalar(list(item_type));
       } else {
         ARROW_ASSIGN_OR_RAISE(auto result, builder->Finish());
-        ARROW_ASSIGN_OR_RAISE(out->value, MakeScalar(list(items->type()), result));
+        ARROW_ASSIGN_OR_RAISE(out->value, MakeScalar(list(item_type), result));
       }
     } else { /* occurrence == FIRST || LAST */
-      bool from_back = (occurrence == MapLookupOptions::LAST);
-
-      ARROW_ASSIGN_OR_RAISE(int64_t key_match_idx,
-                            GetOneMatchingIndex(*keys, *query_key, &from_back));
-      if (key_match_idx != -1) {
-        ARROW_ASSIGN_OR_RAISE(out->value, items->GetScalar(key_match_idx));
+      const std::shared_ptr<Array>& items = struct_array.field(1);
+      ARROW_ASSIGN_OR_RAISE(
+          int64_t item_index,
+          GetOneMatchingIndex(map_keys, query_key,
+                              options.occurrence == MapLookupOptions::LAST));
+      if (item_index != -1) {
+        ARROW_ASSIGN_OR_RAISE(out->value, items->GetScalar(item_index));
       } else {
-        out->value = MakeNullScalar(items->type());
+        out->value = MakeNullScalar(item_type);
       }
     }
     return Status::OK();

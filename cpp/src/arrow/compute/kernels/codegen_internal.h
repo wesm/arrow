@@ -340,7 +340,8 @@ struct UnboxScalar<Type, enable_if_has_c_type<Type>> {
 
 template <typename Type>
 struct UnboxScalar<Type, enable_if_has_string_view<Type>> {
-  static util::string_view Unbox(const Scalar& val) {
+  using T = util::string_view;
+  static T Unbox(const Scalar& val) {
     if (!val.is_valid) return util::string_view();
     return util::string_view(*checked_cast<const BaseBinaryScalar&>(val).value);
   }
@@ -348,14 +349,16 @@ struct UnboxScalar<Type, enable_if_has_string_view<Type>> {
 
 template <>
 struct UnboxScalar<Decimal128Type> {
-  static const Decimal128& Unbox(const Scalar& val) {
+  using T = Decimal128;
+  static const T& Unbox(const Scalar& val) {
     return checked_cast<const Decimal128Scalar&>(val).value;
   }
 };
 
 template <>
 struct UnboxScalar<Decimal256Type> {
-  static const Decimal256& Unbox(const Scalar& val) {
+  using T = Decimal256;
+  static const T& Unbox(const Scalar& val) {
     return checked_cast<const Decimal256Scalar&>(val).value;
   }
 };
@@ -1634,6 +1637,20 @@ ScalarKernel::ExecFunc GenerateDecimal(detail::GetTypeId get_id) {
     default:
       DCHECK(false);
       return ExecFail;
+  }
+}
+
+// Temporarily duplicated for ARROW-16756
+template <template <typename...> class Generator, typename Type0, typename... Args>
+KernelBatchExec GenerateDecimalOld(detail::GetTypeId get_id) {
+  switch (get_id.id) {
+    case Type::DECIMAL128:
+      return Generator<Type0, Decimal128Type, Args...>::Exec;
+    case Type::DECIMAL256:
+      return Generator<Type0, Decimal256Type, Args...>::Exec;
+    default:
+      DCHECK(false);
+      return ExecFailOld;
   }
 }
 

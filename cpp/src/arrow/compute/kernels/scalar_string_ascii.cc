@@ -85,20 +85,20 @@ struct FixedSizeBinaryTransformExecBase {
   }
 
   static Status ExecArray(KernelContext* ctx, StringTransform* transform,
-                          const ArraySpan& data, ExecResult* out) {
+                          const ArraySpan& input, ExecResult* out) {
     ArrayData* output = out->array_data().get();
 
-    const int32_t input_width = data.type->byte_width();
+    const int32_t input_width = input.type->byte_width();
     const int32_t output_width = out->type()->byte_width();
     const int64_t input_nstrings = input.length;
     ARROW_ASSIGN_OR_RAISE(auto values_buffer,
                           ctx->Allocate(output_width * input_nstrings));
     uint8_t* output_str = values_buffer->mutable_data();
 
-    const uint8_t* input_data = data.GetValues<uint8_t>(1);
+    const uint8_t* input_data = input.GetValues<uint8_t>(1);
     for (int64_t i = 0; i < input_nstrings; i++) {
       if (!input.IsNull(i)) {
-        const uint8_t* input_string = input_data + i * byte_width;
+        const uint8_t* input_string = input_data + i * input_width;
         auto encoded_nbytes = static_cast<int32_t>(
             transform->Transform(input_string, input_width, output_str));
         if (encoded_nbytes != output_width) {
@@ -161,8 +161,8 @@ struct FixedSizeBinaryTransformExecWithState
 
 template <typename T>
 static int64_t GetVarBinaryValuesLength(const ArraySpan& span) {
-  const offset_type* offsets = span.GetValues<offset_type>(1);
-  return span.length > 0 ? offsets[input1.length] - offsets[0] : 0;
+  const T* offsets = span.GetValues<T>(1);
+  return span.length > 0 ? offsets[span.length] - offsets[0] : 0;
 }
 
 template <typename Type1, typename Type2>
@@ -275,13 +275,9 @@ struct StringBinaryTransformExecBase {
           return ExecArrayArray(ctx, transform, batch[0].array, batch[1].array, out);
         }
       }
-    } else {
-      return Status::Invalid(
-          "Binary string transform has no combination of operand kinds enabled.");
     }
-
-    return Status::TypeError("Invalid combination of operands (", batch[0].ToString(),
-                             ", ", batch[1].ToString(), ") for binary string transform.");
+    return Status::Invalid(
+        "Binary string transform has no combination of operand kinds enabled.");
   }
 
   static Status ExecScalarScalar(KernelContext* ctx, StringTransform* transform,
@@ -399,16 +395,14 @@ struct StringBinaryTransformExecBase {
     output_offsets[0] = 0;
     offset_type output_ncodeunits = 0;
 
-    const offset_type* data2_offsets = data2.GetValues<offset_type>(1);
-    const uint8_t* data2_data = data2.GetValues<uint8_t>(2, /*offset=*/0);
+    // TODO(wesm): rewrite to not require boxing
+    const ArrayType2 array2(data2.ToArrayData());
 
     // Apply transform
     RETURN_NOT_OK(arrow::internal::VisitBitBlocks(
-        data2->buffers[0], data2->offset, data2->length,
+        data2.buffers[0].data, data2.offset, data2.length,
         [&](int64_t i) {
-          auto value2 = util::string_view(
-              reinterpret_cast<const char*>(data2_data + data2_offsets[i]),
-              data2_offsets[i + 1] - data2_offsets[i]);
+          ViewType2 value2 = array2.GetView(i);
           ARROW_ASSIGN_OR_RAISE(
               auto encoded_nbytes_,
               transform->Transform(input_string, input_ncodeunits, value2,
@@ -452,18 +446,18 @@ struct StringBinaryTransformExecBase {
 
     const offset_type* data1_offsets = data1.GetValues<offset_type>(1);
     const uint8_t* data1_data = data1.GetValues<uint8_t>(2, /*offset=*/0);
-    const offset_type* data2_offsets = data2.GetValues<offset_type>(1);
-    const uint8_t* data2_data = data2.GetValues<uint8_t>(2, /*offset=*/0);
+
+    // TODO(wesm): rewrite to not require boxing
+    const ArrayType2 array2(data2.ToArrayData());
 
     // Apply transform
     RETURN_NOT_OK(arrow::internal::VisitTwoBitBlocks(
-        data1->buffers[0], data1->offset, data2->buffers[0], data2->offset, data1->length,
+        data1.buffers[0].data, data1.offset, data2.buffers[0].data, data2.offset,
+        data1.length,
         [&](int64_t i) {
           const offset_type input_ncodeunits = data1_offsets[i + 1] - data1_offsets[i];
           const uint8_t* input_string = data1_data + data1_offsets[i];
-          auto value2 = util::string_view(
-              reinterpret_cast<const char*>(data2_data + data2_offsets[i]),
-              data2_offsets[i + 1] - data2_offsets[i]);
+          ViewType2 value2 = array2.GetView(i);
           ARROW_ASSIGN_OR_RAISE(
               auto encoded_nbytes_,
               transform->Transform(input_string, input_ncodeunits, value2,
@@ -551,28 +545,31 @@ Status StringDataTransform(KernelContext* ctx, const ExecSpan& batch,
     // TODO(wesm): Rewrite this to note require this, which is expensive
     std::shared_ptr<ArrayData> input = batch[0].array.ToArrayData();
     ArrayType input_boxed(input);
-    ArrayData* out_arr = out->array_data();
+    ArrayData* out_arr = out->array_data().get();
 
-    if (input.offset == 0) {
+    if (input->offset == 0) {
       // We can reuse offsets from input
-      out_arr->buffers[1] = input.buffers[1];
+      out_arr->buffers[1] = input->buffers[1];
     } else {
-      DCHECK(input.buffers[1]);
+      DCHECK(input->buffers[1]);
       // We must allocate new space for the offsets and shift the existing offsets
-      RETURN_NOT_OK(GetShiftedOffsets<offset_type>(ctx, *input.buffers[1], input.offset,
-                                                   input.length, &out_arr->buffers[1]));
+      RETURN_NOT_OK(GetShiftedOffsets<offset_type>(ctx, *input->buffers[1], input->offset,
+                                                   input->length, &out_arr->buffers[1]));
     }
 
     // Allocate space for output data
     int64_t data_nbytes = input_boxed.total_values_length();
     RETURN_NOT_OK(ctx->Allocate(data_nbytes).Value(&out_arr->buffers[2]));
-    if (input.length > 0) {
-      transform(input.buffers[2]->data() + input_boxed.value_offset(0), data_nbytes,
+    if (input->length > 0) {
+      transform(input->buffers[2]->data() + input_boxed.value_offset(0), data_nbytes,
                 out_arr->buffers[2]->mutable_data());
     }
   } else {
+    // Isn't an null output scalar already created? Anyway this code
+    // will be deleted soon per ARROW-16577
     const auto& input = checked_cast<const BaseBinaryScalar&>(*batch[0].scalar);
-    auto result = checked_pointer_cast<BaseBinaryScalar>(MakeNullScalar(out->type()));
+    auto result = checked_pointer_cast<BaseBinaryScalar>(
+        MakeNullScalar(out->type()->GetSharedPtr()));
     if (input.is_valid) {
       result->is_valid = true;
       int64_t data_nbytes = input.value->size();
@@ -955,7 +952,7 @@ struct BinaryLength {
   static Status FixedSizeExec(KernelContext*, const ExecSpan& batch, ExecResult* out) {
     // Output is preallocated and validity buffer is precomputed
     const int32_t width = batch[0].type()->byte_width();
-    if (batch.is_array()) {
+    if (batch[0].is_array()) {
       int32_t* buffer = out->array_span()->GetValues<int32_t>(1);
       std::fill(buffer, buffer + batch.length, width);
     } else {
@@ -2066,7 +2063,7 @@ struct ReplaceSubstring {
 
     if (batch[0].is_array()) {
       // We already know how many strings we have, so we can use Reserve/UnsafeAppend
-      RETURN_NOT_OK(offset_builder.Reserve(batch[0].length + 1));
+      RETURN_NOT_OK(offset_builder.Reserve(batch.length + 1));
       offset_builder.UnsafeAppend(0);  // offsets start at 0
 
       RETURN_NOT_OK(VisitArraySpanInline<Type>(
@@ -2414,7 +2411,7 @@ struct ExtractRegex : public ExtractRegexBase {
 
       std::shared_ptr<Array> out_array;
       RETURN_NOT_OK(struct_builder->Finish(&out_array));
-      out->value = std::move(out_array);
+      out->value = std::move(out_array->data());
     } else {
       const auto& input = checked_cast<const ScalarType&>(*batch[0].scalar);
       auto result = std::make_shared<StructScalar>(type);
@@ -2874,15 +2871,17 @@ struct BinaryJoin {
     const auto& list_scalar = checked_cast<const BaseListScalar&>(left);
     if (!list_scalar.is_valid) {
       ARROW_ASSIGN_OR_RAISE(
-          auto nulls, MakeArrayOfNull(right->type, right.length, ctx->memory_pool()));
-      out->value = *nulls->data();
+          auto nulls,
+          MakeArrayOfNull(right.type->GetSharedPtr(), right.length, ctx->memory_pool()));
+      out->value = std::move(nulls->data());
       return Status::OK();
     }
     const auto& strings = checked_cast<const ArrayType&>(*list_scalar.value);
     if (strings.null_count() != 0) {
       ARROW_ASSIGN_OR_RAISE(
-          auto nulls, MakeArrayOfNull(right->type, right.length, ctx->memory_pool()));
-      out->value = *nulls->data();
+          auto nulls,
+          MakeArrayOfNull(right.type->GetSharedPtr(), right.length, ctx->memory_pool()));
+      out->value = std::move(nulls->data());
       return Status::OK();
     }
     // TODO(wesm): rewrite to not use ArrayData
@@ -2922,7 +2921,7 @@ struct BinaryJoin {
       ARROW_ASSIGN_OR_RAISE(
           auto nulls,
           MakeArrayOfNull(lists.value_type(), lists.length(), ctx->memory_pool()));
-      *out = *nulls->data();
+      out->value = std::move(nulls->data());
       return Status::OK();
     }
 
@@ -3070,7 +3069,7 @@ struct BinaryJoinElementWise {
       return Status::OK();
     }
     ARROW_ASSIGN_OR_RAISE(output->value, ctx->Allocate(final_size));
-    const auto separator = UnboxScalar<Type>::Unbox(*batch.values.back().scalar());
+    const auto separator = UnboxScalar<Type>::Unbox(*batch.values.back().scalar);
     uint8_t* buf = output->value->mutable_data();
     bool first = true;
     for (int i = 0; i < num_args - 1; i++) {
@@ -3116,26 +3115,26 @@ struct BinaryJoinElementWise {
 
     std::vector<util::string_view> valid_cols(batch.num_values());
     for (int64_t row = 0; row < batch.length; row++) {
-      size_t num_valid = 0;  // Not counting separator
+      int num_valid = 0;  // Not counting separator
       for (int col = 0; col < batch.num_values(); col++) {
         if (batch[col].is_scalar()) {
           const auto& scalar = *batch[col].scalar;
           if (scalar.is_valid) {
             valid_cols[col] = UnboxScalar<Type>::Unbox(scalar);
-            if (col < batch.values.size() - 1) num_valid++;
+            if (col < batch.num_values() - 1) num_valid++;
           } else {
             valid_cols[col] = util::string_view();
           }
         } else {
           const ArraySpan& array = batch[col].array;
           if (!array.MayHaveNulls() ||
-              bit_util::GetBit(array.buffers[0].data(), array.offset + row)) {
+              bit_util::GetBit(array.buffers[0].data, array.offset + row)) {
             const offset_type* offsets = array.GetValues<offset_type>(1);
             const uint8_t* data = array.GetValues<uint8_t>(2, /*absolute_offset=*/0);
             const int64_t length = offsets[row + 1] - offsets[row];
             valid_cols[col] = util::string_view(
                 reinterpret_cast<const char*>(data + offsets[row]), length);
-            if (col < batch.values.size() - 1) num_valid++;
+            if (col < batch.num_values() - 1) num_valid++;
           } else {
             valid_cols[col] = util::string_view();
           }
@@ -3186,7 +3185,7 @@ struct BinaryJoinElementWise {
     std::shared_ptr<Array> string_array;
     RETURN_NOT_OK(builder.Finish(&string_array));
     out->value = std::move(string_array->data());
-    out->array_data()->type = batch[0].type();
+    out->array_data()->type = batch[0].type()->GetSharedPtr();
     DCHECK_EQ(batch.length, out->array_data()->length);
     DCHECK_EQ(final_size,
               checked_cast<const ArrayType&>(*string_array).total_values_length());
@@ -3324,7 +3323,7 @@ struct BinaryRepeatTransform : public StringBinaryTransformBase<Type1, Type2> {
   using ArrayType1 = typename TypeTraits<Type1>::ArrayType;
   using ArrayType2 = typename TypeTraits<Type2>::ArrayType;
   using offset_type = typename ArrayType1::offset_type;
-  using repeat_type = typename ArrayType2::c_type;
+  using repeat_type = typename Type2::c_type;
 
   Result<int64_t> MaxCodeunits(const int64_t input1_ncodeunits,
                                const int64_t num_repeats) override {
@@ -3336,7 +3335,7 @@ struct BinaryRepeatTransform : public StringBinaryTransformBase<Type1, Type2> {
                                const ArraySpan& input2) override {
     int64_t total_num_repeats = 0;
     const repeat_type* repeats = input2.GetValues<repeat_type>(1);
-    for (int64_t i = 0; i < input2.length(); ++i) {
+    for (int64_t i = 0; i < input2.length; ++i) {
       ARROW_RETURN_NOT_OK(ValidateRepeatCount(repeats[i]));
       total_num_repeats += repeats[i];
     }
@@ -3354,7 +3353,7 @@ struct BinaryRepeatTransform : public StringBinaryTransformBase<Type1, Type2> {
     int64_t total_codeunits = 0;
     const repeat_type* repeats = input2.GetValues<repeat_type>(1);
     const offset_type* offsets = input1.GetValues<offset_type>(1);
-    for (int64_t i = 0; i < input2.length(); ++i) {
+    for (int64_t i = 0; i < input2.length; ++i) {
       ARROW_RETURN_NOT_OK(ValidateRepeatCount(repeats[i]));
       total_codeunits += (offsets[i + 1] - offsets[i]) * repeats[i];
     }

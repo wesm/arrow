@@ -402,7 +402,7 @@ struct IsInVisitor {
 };
 
 Status ExecIsIn(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-  return IsInVisitor(ctx, batch[0].array, out).Execute();
+  return IsInVisitor(ctx, batch[0].array, out->array_span()).Execute();
 }
 
 // Unary set lookup kernels available for the following input types

@@ -509,6 +509,18 @@ static Status VisitTwoBitBlocks(const uint8_t* left_bitmap, int64_t left_offset,
                                 const uint8_t* right_bitmap, int64_t right_offset,
                                 int64_t length, VisitNotNull&& visit_not_null,
                                 VisitNull&& visit_null) {
+  if (left_bitmap == NULLPTR || right_bitmap == NULLPTR) {
+    // At most one bitmap is present
+    if (left_bitmap == NULLPTR) {
+      return VisitBitBlocks(right_bitmap, right_offset, length,
+                            std::forward<VisitNotNull>(visit_not_null),
+                            std::forward<VisitNull>(visit_null));
+    } else {
+      return VisitBitBlocks(left_bitmap, left_offset, length,
+                            std::forward<VisitNotNull>(visit_not_null),
+                            std::forward<VisitNull>(visit_null));
+    }
+  }
   BinaryBitBlockCounter bit_counter(left_bitmap, left_offset, right_bitmap, right_offset,
                                     length);
   int64_t position = 0;
@@ -542,20 +554,11 @@ static Status VisitTwoBitBlocks(const std::shared_ptr<Buffer>& left_bitmap_buf,
                                 const std::shared_ptr<Buffer>& right_bitmap_buf,
                                 int64_t right_offset, int64_t length,
                                 VisitNotNull&& visit_not_null, VisitNull&& visit_null) {
-  if (left_bitmap_buf == NULLPTR || right_bitmap_buf == NULLPTR) {
-    // At most one bitmap is present
-    if (left_bitmap_buf == NULLPTR) {
-      return VisitBitBlocks(right_bitmap_buf->data(), right_offset, length,
-                            std::forward<VisitNotNull>(visit_not_null),
-                            std::forward<VisitNull>(visit_null));
-    } else {
-      return VisitBitBlocks(left_bitmap_buf->data(), left_offset, length,
-                            std::forward<VisitNotNull>(visit_not_null),
-                            std::forward<VisitNull>(visit_null));
-    }
-  }
-  return VisitTwoBitBlocks(left_bitmap_buf->data(), left_offset, right_bitmap_buf->data(),
-                           right_offset, length,
+  const uint8_t* left_bitmap =
+      left_bitmap_buf == NULLPTR ? nullptr : left_bitmap_buf->data();
+  const uint8_t* right_bitmap =
+      right_bitmap_buf == NULLPTR ? nullptr : right_bitmap_buf->data();
+  return VisitTwoBitBlocks(left_bitmap, left_offset, right_bitmap, right_offset, length,
                            std::forward<VisitNotNull>(visit_not_null),
                            std::forward<VisitNull>(visit_null));
 }
@@ -565,6 +568,18 @@ static void VisitTwoBitBlocksVoid(const uint8_t* left_bitmap, int64_t left_offse
                                   const uint8_t* right_bitmap, int64_t right_offset,
                                   int64_t length, VisitNotNull&& visit_not_null,
                                   VisitNull&& visit_null) {
+  if (left_bitmap == NULLPTR || right_bitmap == NULLPTR) {
+    // At most one bitmap is present
+    if (left_bitmap == NULLPTR) {
+      return VisitBitBlocksVoid(right_bitmap, right_offset, length,
+                                std::forward<VisitNotNull>(visit_not_null),
+                                std::forward<VisitNull>(visit_null));
+    } else {
+      return VisitBitBlocksVoid(left_bitmap, left_offset, length,
+                                std::forward<VisitNotNull>(visit_not_null),
+                                std::forward<VisitNull>(visit_null));
+    }
+  }
   BinaryBitBlockCounter bit_counter(left_bitmap, left_offset, right_bitmap, right_offset,
                                     length);
   int64_t position = 0;
@@ -597,23 +612,13 @@ static void VisitTwoBitBlocksVoid(const std::shared_ptr<Buffer>& left_bitmap_buf
                                   const std::shared_ptr<Buffer>& right_bitmap_buf,
                                   int64_t right_offset, int64_t length,
                                   VisitNotNull&& visit_not_null, VisitNull&& visit_null) {
-  if (left_bitmap_buf == NULLPTR || right_bitmap_buf == NULLPTR) {
-    // At most one bitmap is present
-    if (left_bitmap_buf == NULLPTR) {
-      return VisitBitBlocksVoid(right_bitmap_buf, right_offset, length,
-                                std::forward<VisitNotNull>(visit_not_null),
-                                std::forward<VisitNull>(visit_null));
-    } else {
-      return VisitBitBlocksVoid(left_bitmap_buf, left_offset, length,
-                                std::forward<VisitNotNull>(visit_not_null),
-                                std::forward<VisitNull>(visit_null));
-    }
-  }
-  // Both bitmaps are present
-  return VisitTwoBitBlocksVoid(left_bitmap_buf->data(), left_offset,
-                               right_bitmap_buf->data(), right_offset, length,
-                               std::forward<VisitNotNull>(visit_not_null),
-                               std::forward<VisitNull>(visit_null));
+  const uint8_t* left_bitmap =
+      left_bitmap_buf == NULLPTR ? nullptr : left_bitmap_buf->data();
+  const uint8_t* right_bitmap =
+      right_bitmap_buf == NULLPTR ? nullptr : right_bitmap_buf->data();
+  return VisitTwoBitBlocksVoid(
+      left_bitmap_buf, left_offset, right_bitmap_buf, right_offset, length,
+      std::forward<VisitNotNull>(visit_not_null), std::forward<VisitNull>(visit_null));
 }
 
 }  // namespace internal

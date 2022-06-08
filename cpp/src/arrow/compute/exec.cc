@@ -870,7 +870,9 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
     if (output_descr_.type->id() == Type::NA) {
       result_span->null_count = result_span->length;
     } else if (kernel_->null_handling == NullHandling::INTERSECTION) {
-      PropagateNullsSpans(input, result_span);
+      if (!elide_validity_bitmap_) {
+        PropagateNullsSpans(input, result_span);
+      }
     } else if (kernel_->null_handling == NullHandling::OUTPUT_NOT_NULL) {
       result_span->null_count = 0;
     }
@@ -941,24 +943,19 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
     // - kernel_->null_handling is COMPUTED_NO_PREALLOCATE or OUTPUT_NOT_NULL
     validity_preallocated_ = false;
 
-    // Used to account for the case where we do not preallocate a
-    // validity bitmap because the inputs are all non-null and we're
-    // using NullHandling::INTERSECTION to compute the validity bitmap
-    bool elide_validity_bitmap = false;
-
     if (out_type_id != Type::NA) {
       if (kernel_->null_handling == NullHandling::COMPUTED_PREALLOCATE) {
         // Override the flag if kernel asks for pre-allocation
         validity_preallocated_ = true;
       } else if (kernel_->null_handling == NullHandling::INTERSECTION) {
-        elide_validity_bitmap = true;
+        elide_validity_bitmap_ = true;
         for (const auto& arg : args) {
           auto null_gen = NullGeneralization::Get(arg) == NullGeneralization::ALL_VALID;
 
           // If not all valid, this becomes false
-          elide_validity_bitmap = elide_validity_bitmap && null_gen;
+          elide_validity_bitmap_ = elide_validity_bitmap_ && null_gen;
         }
-        validity_preallocated_ = !elide_validity_bitmap;
+        validity_preallocated_ = !elide_validity_bitmap_;
       }
     }
     if (kernel_->mem_allocation == MemAllocation::PREALLOCATE) {
@@ -969,7 +966,7 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
     // buffers allocated. This is basically only true for primitive
     // types that are not dictionary-encoded
     preallocating_all_buffers_ =
-        ((validity_preallocated_ || elide_validity_bitmap) &&
+        ((validity_preallocated_ || elide_validity_bitmap_) &&
          data_preallocated_.size() == static_cast<size_t>(output_num_buffers_ - 1) &&
          !is_nested(out_type_id) && !is_dictionary(out_type_id));
 
@@ -989,6 +986,11 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
          preallocating_all_buffers_);
     return Status::OK();
   }
+
+  // Used to account for the case where we do not preallocate a
+  // validity bitmap because the inputs are all non-null and we're
+  // using NullHandling::INTERSECTION to compute the validity bitmap
+  bool elide_validity_bitmap_ = false;
 
   // All memory is preallocated for output, contiguous and
   // non-contiguous

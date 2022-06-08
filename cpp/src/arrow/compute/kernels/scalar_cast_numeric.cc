@@ -41,7 +41,11 @@ namespace internal {
 Status CastIntegerToInteger(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   const auto& options = checked_cast<const CastState*>(ctx->state())->options;
   if (!options.allow_int_overflow) {
-    RETURN_NOT_OK(IntegersCanFit(batch[0].array, *out->type()));
+    if (batch[0].is_array()) {
+      RETURN_NOT_OK(IntegersCanFit(batch[0].array, *out->type()));
+    } else {
+      RETURN_NOT_OK(IntegersCanFit(*batch[0].scalar, *out->type()));
+    }
   }
   CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
   return Status::OK();

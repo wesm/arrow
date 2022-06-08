@@ -1232,7 +1232,10 @@ void PropagateNullsSpans(const ExecSpan& batch, ArraySpan* out) {
   if (arrays_with_nulls.empty()) {
     // No arrays with nulls case
     out->null_count = 0;
-    bit_util::SetBitsTo(out_bitmap, out->offset, out->length, true);
+    if (out_bitmap != nullptr) {
+      // An output buffer was allocated, so we fill it with all valid
+      bit_util::SetBitsTo(out_bitmap, out->offset, out->length, true);
+    }
   } else if (arrays_with_nulls.size() == 1) {
     // One array
     const ArraySpan& arr = *arrays_with_nulls[0];

@@ -382,11 +382,14 @@ struct ARROW_EXPORT ExecSpan {
   ExecSpan(ExecSpan&& other) = default;
   ExecSpan& operator=(ExecSpan&& other) = default;
 
+  explicit ExecSpan(std::vector<ExecValue> values, int64_t length)
+      : length(length), values(std::move(values)) {}
+
   explicit ExecSpan(const ExecBatch& batch) {
     this->length = batch.length;
     this->values.resize(batch.values.size());
     for (size_t i = 0; i < batch.values.size(); ++i) {
-      const Datum& in_value = batch[0];
+      const Datum& in_value = batch[i];
       ExecValue* out_value = &this->values[i];
       if (in_value.is_array()) {
         out_value->SetArray(*in_value.array());

@@ -370,7 +370,7 @@ class DictionaryBuilderBase : public ArrayBuilder {
     // Visit the indices and insert the unpacked values.
     const auto& dict_ty = internal::checked_cast<const DictionaryType&>(*array.type);
     // See if possible to avoid using ToArrayData here
-    const typename TypeTraits<T>::ArrayType dict(array.ToArrayData());
+    const typename TypeTraits<T>::ArrayType dict(array.dictionary().ToArrayData());
     ARROW_RETURN_NOT_OK(Reserve(length));
     switch (dict_ty.index_type()->id()) {
       case Type::UINT8:

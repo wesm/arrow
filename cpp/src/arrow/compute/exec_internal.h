@@ -110,7 +110,13 @@ class ARROW_EXPORT ExecSpanIterator {
   bool have_chunked_arrays_ = false;
   const std::vector<Datum>& args_;
   std::vector<int> chunk_indexes_;
-  std::vector<int64_t> chunk_positions_;
+  std::vector<int64_t> value_positions_;
+
+  // Keep track of the array offset in the "active" array (e.g. the
+  // array or the particular chunk of an array) in each slot, separate
+  // from the relative position within each chunk (which is in
+  // value_positions_)
+  std::vector<int64_t> value_offsets_;
   int64_t position_;
   int64_t length_;
   int64_t max_chunksize_;
@@ -183,6 +189,9 @@ class ARROW_EXPORT KernelExecutor {
 /// \param[in] out the output ArrayData, must not be null
 ARROW_EXPORT
 Status PropagateNulls(KernelContext* ctx, const ExecSpan& batch, ArrayData* out);
+
+ARROW_EXPORT
+void PropagateNullsSpans(const ExecSpan& batch, ArraySpan* out);
 
 }  // namespace detail
 }  // namespace compute

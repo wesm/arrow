@@ -183,7 +183,7 @@ Status OutputAllNull(KernelContext* ctx, const ExecSpan& batch, ExecResult* out)
   } else {
     ArraySpan* output = out->array_span();
     DCHECK(output->buffers[0].data == nullptr);
-    DCHECK(output->buffers[0].length == 0);
+    DCHECK(output->buffers[0].size == 0);
     output->null_count = batch.length;
   }
   return Status::OK();

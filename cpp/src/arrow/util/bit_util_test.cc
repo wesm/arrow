@@ -2285,9 +2285,9 @@ TEST(Bitmap, VisitWordsAnd) {
                   uint64s[0] & uint64s[1];
             });
 
-        BitmapAnd(bitmaps[0].buffer()->data(), bitmaps[0].offset(),
-                  bitmaps[1].buffer()->data(), bitmaps[1].offset(), bitmaps[0].length(),
-                  0, expected_buffer->mutable_data());
+        BitmapAnd(bitmaps[0].data(), bitmaps[0].offset(), bitmaps[1].data(),
+                  bitmaps[1].offset(), bitmaps[0].length(), 0,
+                  expected_buffer->mutable_data());
 
         ASSERT_TRUE(BitmapEquals(actual_buffer->data(), min_offset,
                                  expected_buffer->data(), 0, num_bits))
@@ -2333,20 +2333,18 @@ void DoBitmapVisitAndWrite(int64_t part, bool with_offset) {
       });
 
   auto pool = MemoryPool::CreateDefault();
-  ASSERT_OK_AND_ASSIGN(auto exp_0,
-                       BitmapAnd(pool.get(), bm0.buffer()->data(), bm0.offset(),
-                                 bm1.buffer()->data(), bm1.offset(), part, 0));
-  ASSERT_OK_AND_ASSIGN(auto exp_1,
-                       BitmapOr(pool.get(), bm0.buffer()->data(), bm0.offset(),
-                                bm2.buffer()->data(), bm2.offset(), part, 0));
+  ASSERT_OK_AND_ASSIGN(auto exp_0, BitmapAnd(pool.get(), bm0.data(), bm0.offset(),
+                                             bm1.data(), bm1.offset(), part, 0));
+  ASSERT_OK_AND_ASSIGN(auto exp_1, BitmapOr(pool.get(), bm0.data(), bm0.offset(),
+                                            bm2.data(), bm2.offset(), part, 0));
 
-  ASSERT_TRUE(BitmapEquals(exp_0->data(), 0, out_bms[0].buffer()->data(),
-                           out_bms[0].offset(), part))
+  ASSERT_TRUE(
+      BitmapEquals(exp_0->data(), 0, out_bms[0].data(), out_bms[0].offset(), part))
       << "exp: " << Bitmap(exp_0->data(), 0, part).ToString() << std::endl
       << "got: " << out_bms[0].ToString();
 
-  ASSERT_TRUE(BitmapEquals(exp_1->data(), 0, out_bms[1].buffer()->data(),
-                           out_bms[1].offset(), part))
+  ASSERT_TRUE(
+      BitmapEquals(exp_1->data(), 0, out_bms[1].data(), out_bms[1].offset(), part))
       << "exp: " << Bitmap(exp_1->data(), 0, part).ToString() << std::endl
       << "got: " << out_bms[1].ToString();
 }

@@ -372,6 +372,9 @@ class ARROW_EXPORT Bitmap : public util::ToStringOstreamable<Bitmap>,
     }
   }
 
+  const uint8_t* data() const { return data_; }
+  uint8_t* mutable_data() { return mutable_data_; }
+
   /// offset of first bit relative to buffer().data()
   int64_t offset() const { return offset_; }
 

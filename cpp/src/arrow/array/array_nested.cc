@@ -580,7 +580,7 @@ const std::shared_ptr<Array>& StructArray::field(int i) const {
     }
     std::shared_ptr<Array> result = MakeArray(field_data);
     internal::atomic_store(&boxed_fields_[i], result);
-    return result;
+    return boxed_fields_[i];
   }
   return result;
 }

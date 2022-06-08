@@ -268,9 +268,34 @@ ExecBatchIterator::ExecBatchIterator(const std::vector<Datum>& args, int64_t len
 
 Result<std::unique_ptr<ExecBatchIterator>> ExecBatchIterator::Make(
     const std::vector<Datum>& args, int64_t max_chunksize) {
+  for (const auto& arg : args) {
+    if (!(arg.is_arraylike() || arg.is_scalar())) {
+      return Status::Invalid(
+          "ExecBatchIterator only works with Scalar, Array, and "
+          "ChunkedArray arguments");
+    }
+  }
+
+  // If the arguments are all scalars, then the length is 1
   int64_t length = 1;
-  RETURN_NOT_OK(GetBatchLength(args, &length));
+
+  bool length_set = false;
+  for (auto& arg : args) {
+    if (arg.is_scalar()) {
+      continue;
+    }
+    if (!length_set) {
+      length = arg.length();
+      length_set = true;
+    } else {
+      if (arg.length() != length) {
+        return Status::Invalid("Array arguments must all be the same length");
+      }
+    }
+  }
+
   max_chunksize = std::min(length, max_chunksize);
+
   return std::unique_ptr<ExecBatchIterator>(
       new ExecBatchIterator(args, length, max_chunksize));
 }
@@ -334,7 +359,8 @@ ExecSpanIterator::ExecSpanIterator(const std::vector<Datum>& args, int64_t lengt
                                    int64_t max_chunksize)
     : args_(args), position_(0), length_(length), max_chunksize_(max_chunksize) {
   chunk_indexes_.resize(args_.size(), 0);
-  chunk_positions_.resize(args_.size(), 0);
+  value_positions_.resize(args_.size(), 0);
+  value_offsets_.resize(args_.size(), 0);
 }
 
 Result<std::unique_ptr<ExecSpanIterator>> ExecSpanIterator::Make(
@@ -354,26 +380,35 @@ int64_t ExecSpanIterator::GetNextChunkSpan(int64_t iteration_size, ExecSpan* spa
     if (!args_[i].is_chunked_array()) {
       continue;
     }
-    const ChunkedArray& arg = *args_[i].chunked_array();
+    const ChunkedArray* arg = args_[i].chunked_array().get();
     const Array* current_chunk;
     while (true) {
-      current_chunk = arg.chunk(chunk_indexes_[i]).get();
-      if (chunk_positions_[i] == current_chunk->length()) {
-        // Chunk is zero-length, or was exhausted in the previous iteration
-        span->values[i].SetArray(*current_chunk->data());
-        chunk_positions_[i] = 0;
+      current_chunk = arg->chunk(chunk_indexes_[i]).get();
+      if (value_positions_[i] == current_chunk->length()) {
+        // Chunk is zero-length, or was exhausted in the previous
+        // iteration. Move to the next chunk
         ++chunk_indexes_[i];
+        current_chunk = arg->chunk(chunk_indexes_[i]).get();
+        span->values[i].SetArray(*current_chunk->data());
+        value_positions_[i] = 0;
+        value_offsets_[i] = current_chunk->offset();
         continue;
       }
       break;
     }
     iteration_size =
-        std::min(current_chunk->length() - chunk_positions_[i], iteration_size);
+        std::min(current_chunk->length() - value_positions_[i], iteration_size);
   }
   return iteration_size;
 }
 
 bool ExecSpanIterator::Next(ExecSpan* span) {
+  if (position_ == length_) {
+    // This also protects from degenerate cases like ChunkedArrays
+    // without any chunks
+    return false;
+  }
+
   if (!initialized_) {
     span->length = 0;
 
@@ -387,11 +422,15 @@ bool ExecSpanIterator::Next(ExecSpan* span) {
       if (args_[i].is_scalar()) {
         span->values[i].SetScalar(args_[i].scalar().get());
       } else if (args_[i].is_array()) {
-        span->values[i].SetArray(*args_[i].array());
+        const ArrayData& arr = *args_[i].array();
+        span->values[i].SetArray(arr);
+        value_offsets_[i] = arr.offset;
       } else {
         // Populate members from the first chunk
         const Array* first_chunk = args_[i].chunked_array()->chunk(0).get();
-        span->values[i].SetArray(*first_chunk->data());
+        const ArrayData& arr = *first_chunk->data();
+        span->values[i].SetArray(arr);
+        value_offsets_[i] = arr.offset;
         have_chunked_arrays_ = true;
       }
     }
@@ -404,8 +443,6 @@ bool ExecSpanIterator::Next(ExecSpan* span) {
 
   // Determine how large the common contiguous "slice" of all the arguments is
   int64_t iteration_size = std::min(length_ - position_, max_chunksize_);
-
-  // If length_ is 0, then this loop will never execute
   if (have_chunked_arrays_) {
     iteration_size = GetNextChunkSpan(iteration_size, span);
   }
@@ -414,15 +451,11 @@ bool ExecSpanIterator::Next(ExecSpan* span) {
   span->length = iteration_size;
   for (size_t i = 0; i < args_.size(); ++i) {
     const Datum& arg = args_[i];
-    if (arg.is_array()) {
+    if (!arg.is_scalar()) {
       ArraySpan* arr = &span->values[i].array;
       arr->length = iteration_size;
-      arr->SetOffset(position_);
-    } else if (have_chunked_arrays_ && arg.is_chunked_array()) {
-      ArraySpan* arr = &span->values[i].array;
-      arr->length = iteration_size;
-      arr->SetOffset(chunk_positions_[i]);
-      chunk_positions_[i] += iteration_size;
+      arr->SetOffset(value_positions_[i] + value_offsets_[i]);
+      value_positions_[i] += iteration_size;
     }
   }
   position_ += iteration_size;
@@ -472,66 +505,6 @@ struct NullGeneralization {
     return Get(value);
   }
 };
-
-void PropagateNullsSpans(const ExecSpan& batch, ArraySpan* out) {
-  if (out->type->id() == Type::NA) {
-    // Null output type is a no-op (rare when this would happen but we at least
-    // will test for it)
-
-    // TODO(wesm): when does this occur?
-    DCHECK(false);
-    return;
-  }
-
-  std::vector<const ArraySpan*> arrays_with_nulls;
-  bool is_all_null = false;
-  for (const ExecValue& value : batch.values) {
-    auto null_generalization = NullGeneralization::Get(value);
-    if (null_generalization == NullGeneralization::ALL_NULL) {
-      is_all_null = true;
-    }
-    if (null_generalization != NullGeneralization::ALL_VALID && value.is_array()) {
-      arrays_with_nulls.push_back(&value.array);
-    }
-  }
-  uint8_t* out_bitmap = out->buffers[0].data;
-  if (is_all_null) {
-    // An all-null value (scalar null or all-null array) gives us a short
-    // circuit opportunity
-    // OK, the output should be all null
-    out->null_count = out->length;
-    bit_util::SetBitsTo(out_bitmap, out->offset, out->length, false);
-  }
-
-  out->null_count = kUnknownNullCount;
-  if (arrays_with_nulls.empty()) {
-    // No arrays with nulls case
-    out->null_count = 0;
-    bit_util::SetBitsTo(out_bitmap, out->offset, out->length, true);
-  } else if (arrays_with_nulls.size() == 1) {
-    // One array
-    const ArraySpan& arr = *arrays_with_nulls[0];
-
-    // Reuse the null count if it's known
-    out->null_count = arr.null_count;
-    CopyBitmap(arr.buffers[0].data, arr.offset, arr.length, out_bitmap, out->offset);
-  } else {
-    // More than one array. We use BitmapAnd to intersect their bitmaps
-    auto Accumulate = [&](const ArraySpan& left, const ArraySpan& right) {
-      DCHECK(left.buffers[0].data != nullptr);
-      DCHECK(right.buffers[0].data != nullptr);
-      BitmapAnd(left.buffers[0].data, left.offset, right.buffers[0].data, right.offset,
-                out->length, out->offset, out_bitmap);
-    };
-    // Seed the output bitmap with the & of the first two bitmaps
-    Accumulate(*arrays_with_nulls[0], *arrays_with_nulls[1]);
-
-    // Accumulate the rest
-    for (size_t i = 2; i < arrays_with_nulls.size(); ++i) {
-      Accumulate(*out, *arrays_with_nulls[i]);
-    }
-  }
-}
 
 // Null propagation implementation that deals both with preallocated bitmaps
 // and maybe-to-be allocated bitmaps
@@ -650,7 +623,7 @@ class NullPropagator {
 
     // Accumulate the rest
     for (size_t i = 2; i < arrays_with_nulls_.size(); ++i) {
-      Accumulate(bitmap_, output_->offset, arrays_with_nulls_[i]->buffers[1].data,
+      Accumulate(bitmap_, output_->offset, arrays_with_nulls_[i]->buffers[0].data,
                  arrays_with_nulls_[i]->offset);
     }
     return Status::OK();
@@ -805,7 +778,7 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
                           ExecSpanIterator::Make(args, exec_context()->exec_chunksize()));
 
     // TODO(wesm): remove if with ARROW-16757
-    if (output_descr_.shape == ValueDescr::SCALAR) {
+    if (output_descr_.shape != ValueDescr::SCALAR) {
       // If the executor is configured to produce a single large Array output for
       // kernels supporting preallocation, then we do so up front and then
       // iterate over slices of that large array. Otherwise, we preallocate prior
@@ -867,11 +840,12 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
 
       // Populate and then reuse the ArraySpan inside
       output_span->SetMembers(*preallocation);
+      output_span->offset = 0;
       while (span_iterator_->Next(&input)) {
         // Set absolute output span position and length
-        output_span->SetOffset(span_iterator_->position());
         output_span->length = input.length;
         RETURN_NOT_OK(ExecuteSingleSpan(input, &output));
+        output_span->SetOffset(span_iterator_->position());
       }
 
       // Kernel execution is complete; emit result
@@ -950,7 +924,11 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
       RETURN_NOT_OK(kernel_->exec(kernel_ctx_, input, &output));
 
       // Emit a result for each chunk
-      RETURN_NOT_OK(listener->OnResult(output.array_data()));
+      if (output_descr_.shape == ValueDescr::ARRAY) {
+        RETURN_NOT_OK(listener->OnResult(output.array_data()));
+      } else {
+        RETURN_NOT_OK(listener->OnResult(output.scalar()));
+      }
     }
     return Status::OK();
   }
@@ -1220,6 +1198,64 @@ Status PropagateNulls(KernelContext* ctx, const ExecSpan& batch, ArrayData* outp
   }
   NullPropagator propagator(ctx, batch, output);
   return propagator.Execute();
+}
+
+void PropagateNullsSpans(const ExecSpan& batch, ArraySpan* out) {
+  if (out->type->id() == Type::NA) {
+    // Null output type is a no-op (rare when this would happen but we at least
+    // will test for it)
+    return;
+  }
+
+  std::vector<const ArraySpan*> arrays_with_nulls;
+  bool is_all_null = false;
+  for (const ExecValue& value : batch.values) {
+    auto null_generalization = NullGeneralization::Get(value);
+    if (null_generalization == NullGeneralization::ALL_NULL) {
+      is_all_null = true;
+    }
+    if (null_generalization != NullGeneralization::ALL_VALID && value.is_array()) {
+      arrays_with_nulls.push_back(&value.array);
+    }
+  }
+  uint8_t* out_bitmap = out->buffers[0].data;
+  if (is_all_null) {
+    // An all-null value (scalar null or all-null array) gives us a short
+    // circuit opportunity
+    // OK, the output should be all null
+    out->null_count = out->length;
+    bit_util::SetBitsTo(out_bitmap, out->offset, out->length, false);
+    return;
+  }
+
+  out->null_count = kUnknownNullCount;
+  if (arrays_with_nulls.empty()) {
+    // No arrays with nulls case
+    out->null_count = 0;
+    bit_util::SetBitsTo(out_bitmap, out->offset, out->length, true);
+  } else if (arrays_with_nulls.size() == 1) {
+    // One array
+    const ArraySpan& arr = *arrays_with_nulls[0];
+
+    // Reuse the null count if it's known
+    out->null_count = arr.null_count;
+    CopyBitmap(arr.buffers[0].data, arr.offset, arr.length, out_bitmap, out->offset);
+  } else {
+    // More than one array. We use BitmapAnd to intersect their bitmaps
+    auto Accumulate = [&](const ArraySpan& left, const ArraySpan& right) {
+      DCHECK(left.buffers[0].data != nullptr);
+      DCHECK(right.buffers[0].data != nullptr);
+      BitmapAnd(left.buffers[0].data, left.offset, right.buffers[0].data, right.offset,
+                out->length, out->offset, out_bitmap);
+    };
+    // Seed the output bitmap with the & of the first two bitmaps
+    Accumulate(*arrays_with_nulls[0], *arrays_with_nulls[1]);
+
+    // Accumulate the rest
+    for (size_t i = 2; i < arrays_with_nulls.size(); ++i) {
+      Accumulate(*out, *arrays_with_nulls[i]);
+    }
+  }
 }
 
 std::unique_ptr<KernelExecutor> KernelExecutor::MakeScalar() {

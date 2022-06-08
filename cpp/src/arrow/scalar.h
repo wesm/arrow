@@ -107,6 +107,7 @@ struct ARROW_EXPORT Scalar : public std::enable_shared_from_this<Scalar>,
   /// \brief Apply the ScalarVisitor::Visit() method specialized to the scalar type
   Status Accept(ScalarVisitor* visitor) const;
 
+  /// EXPERIMENTAL
   std::shared_ptr<Scalar> GetSharedPtr() const {
     return const_cast<Scalar*>(this)->shared_from_this();
   }

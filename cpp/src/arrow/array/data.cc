@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/array/util.h"
 #include "arrow/buffer.h"
 #include "arrow/status.h"
 #include "arrow/type.h"
@@ -142,27 +143,23 @@ void ArraySpan::SetMembers(const ArrayData& data) {
     // It is the invoker-of-kernels's responsibility to ensure that
     // const buffers are not written to accidentally.
     if (buffer) {
-      this->buffers[i].data = const_cast<uint8_t*>(buffer->data());
-      this->buffers[i].length = buffer->size();
-      this->buffers[i].owner = &buffer;
+      SetBuffer(i, buffer);
     } else {
-      this->buffers[i].data = nullptr;
-      this->buffers[i].length = 0;
-      this->buffers[i].owner = nullptr;
+      ClearBuffer(i);
     }
   }
 
   // Makes sure any other buffers are seen as null / non-existent
   for (size_t i = data.buffers.size(); i < 3; ++i) {
-    this->buffers[i].data = nullptr;
-    this->buffers[i].length = 0;
-    this->buffers[i].owner = nullptr;
+    ClearBuffer(i);
   }
+
+  // TODO(wesm): what about extension arrays?
 
   if (this->type->id() == Type::DICTIONARY) {
     this->child_data.resize(1);
     this->child_data[0].SetMembers(*data.dictionary);
-  } else if (data.child_data.size() > 0) {
+  } else {
     this->child_data.resize(data.child_data.size());
     for (size_t child_index = 0; child_index < data.child_data.size(); ++child_index) {
       this->child_data[child_index].SetMembers(*data.child_data[child_index]);
@@ -184,18 +181,40 @@ int64_t ArraySpan::GetNullCount() const {
   return precomputed;
 }
 
-std::shared_ptr<ArrayData> ArraySpan::ToArrayData() const {
-  auto result =
-      std::make_shared<ArrayData>(const_cast<DataType*>(this->type)->shared_from_this(),
-                                  this->length, kUnknownNullCount, this->offset);
-  for (int i = 0; i < 3; ++i) {
-    if (!buffers[i].owner) {
-      /// XXX there is risk of yielding a malformed buffer, but this
-      /// minimal implementation will suffice for now
-      break;
-    }
-    result->buffers.push_back(this->GetBuffer(i));
+int ArraySpan::num_buffers() const {
+  switch (this->type->id()) {
+    case Type::NA:
+    case Type::EXTENSION:
+      return 0;
+    case Type::STRUCT:
+    case Type::FIXED_SIZE_LIST:
+      return 1;
+    case Type::BINARY:
+    case Type::LARGE_BINARY:
+    case Type::STRING:
+    case Type::LARGE_STRING:
+    case Type::DENSE_UNION:
+      return 3;
+    default:
+      // Everything else has 2 buffers
+      return 2;
   }
+}
+
+std::shared_ptr<ArrayData> ArraySpan::ToArrayData() const {
+  auto result = std::make_shared<ArrayData>(this->type->GetSharedPtr(), this->length,
+                                            kUnknownNullCount, this->offset);
+
+  for (int i = 0; i < this->num_buffers(); ++i) {
+    if (this->buffers[i].owner) {
+      result->buffers.emplace_back(this->GetBuffer(i));
+    } else {
+      result->buffers.push_back(nullptr);
+    }
+  }
+
+  // TODO(wesm): what about extension arrays?
+
   if (this->type->id() == Type::DICTIONARY) {
     result->dictionary = this->dictionary().ToArrayData();
   } else {
@@ -205,6 +224,10 @@ std::shared_ptr<ArrayData> ArraySpan::ToArrayData() const {
     }
   }
   return result;
+}
+
+std::shared_ptr<Array> ArraySpan::ToArray() const {
+  return MakeArray(this->ToArrayData());
 }
 
 // ----------------------------------------------------------------------

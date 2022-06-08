@@ -188,7 +188,7 @@ class ARROW_EXPORT DataType : public std::enable_shared_from_this<DataType>,
   /// subclasses of FixedWidthType
   virtual int bit_width() const { return -1; }
 
-  // \brief Enable retrieving shared_ptr<DataType> from a const
+  // \brief EXPERIMENTAL: Enable retrieving shared_ptr<DataType> from a const
   // context. Consider renaming
   std::shared_ptr<DataType> GetSharedPtr() const {
     return const_cast<DataType*>(this)->shared_from_this();
@@ -717,6 +717,7 @@ class ARROW_EXPORT FixedSizeBinaryType : public FixedWidthType, public Parametri
         {DataTypeLayout::Bitmap(), DataTypeLayout::FixedWidth(byte_width())});
   }
 
+  int32_t byte_width() const override { return byte_width_; }
   int bit_width() const override;
 
   // Validating constructor

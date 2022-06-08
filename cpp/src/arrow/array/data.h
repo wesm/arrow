@@ -31,6 +31,8 @@
 
 namespace arrow {
 
+class Array;
+
 // When slicing, we do not know the null count of the sliced range without
 // doing some computation. To avoid doing this eagerly, we set the null count
 // to -1 (any negative number will do). When Array::null_count is called the
@@ -249,7 +251,7 @@ struct ARROW_EXPORT BufferRef {
   // buffers that were const originally are not written to
   // accidentally.
   uint8_t* data = NULLPTR;
-  int64_t length = 0;
+  int64_t size = 0;
   // Pointer back to buffer that owns this memory
   const std::shared_ptr<Buffer>* owner = NULLPTR;
 };
@@ -265,6 +267,7 @@ struct ARROW_EXPORT ArraySpan {
 
   ArraySpan() = default;
 
+  explicit ArraySpan(const DataType* type, int64_t length) : type(type), length(length) {}
   explicit ArraySpan(const ArrayData& data) { SetMembers(data); }
 
   /// If dictionary-encoded, put dictionary in the first entry
@@ -273,7 +276,23 @@ struct ARROW_EXPORT ArraySpan {
 
   void SetMembers(const ArrayData& data);
 
+  void SetBuffer(int index, const std::shared_ptr<Buffer>& buffer) {
+    this->buffers[index].data = const_cast<uint8_t*>(buffer->data());
+    this->buffers[index].size = buffer->size();
+    this->buffers[index].owner = &buffer;
+  }
+
+  void ClearBuffer(int index) {
+    this->buffers[index].data = NULLPTR;
+    this->buffers[index].size = 0;
+    this->buffers[index].owner = NULLPTR;
+  }
+
   const ArraySpan& dictionary() const { return child_data[0]; }
+
+  /// \brief Return the number of buffers (out of 3) that are used to
+  /// constitute this array
+  int num_buffers() const;
 
   // Access a buffer's data as a typed C pointer
   template <typename T>
@@ -310,6 +329,8 @@ struct ARROW_EXPORT ArraySpan {
   }
 
   std::shared_ptr<ArrayData> ToArrayData() const;
+
+  std::shared_ptr<Array> ToArray() const;
 
   std::shared_ptr<Buffer> GetBuffer(int index) const {
     if (this->buffers[index].owner == NULLPTR) {

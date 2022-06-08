@@ -256,8 +256,9 @@ struct ARROW_EXPORT BufferRef {
   const std::shared_ptr<Buffer>* owner = NULLPTR;
 };
 
-/// \brief A non-owning ArrayData reference that is cheaply copyable
-/// and does not contain any shared_ptr objects
+/// \brief EXPERIMENTAL: A non-owning ArrayData reference that is cheaply
+/// copyable and does not contain any shared_ptr objects. Do not use in public
+/// APIs aside from compute kernels for now
 struct ARROW_EXPORT ArraySpan {
   const DataType* type;
   int64_t length = 0;
@@ -269,10 +270,15 @@ struct ARROW_EXPORT ArraySpan {
 
   explicit ArraySpan(const DataType* type, int64_t length) : type(type), length(length) {}
   explicit ArraySpan(const ArrayData& data) { SetMembers(data); }
+  explicit ArraySpan(const Scalar& data) { FillFromScalar(data); }
 
   /// If dictionary-encoded, put dictionary in the first entry
   // TODO(wesm): would a std::unique_ptr<vector<...>> be better?
   std::vector<ArraySpan> child_data;
+
+  /// \brief Populate ArraySpan to look like an array of length 1 pointing at
+  /// the data members of a Scalar value
+  void FillFromScalar(const Scalar& value);
 
   void SetMembers(const ArrayData& data);
 

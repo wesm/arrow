@@ -27,8 +27,10 @@
 
 #include "arrow/array/util.h"
 #include "arrow/buffer.h"
+#include "arrow/scalar.h"
 #include "arrow/status.h"
 #include "arrow/type.h"
+#include "arrow/type_traits.h"
 #include "arrow/util/bitmap_ops.h"
 #include "arrow/util/logging.h"
 #include "arrow/util/macros.h"
@@ -164,6 +166,29 @@ void ArraySpan::SetMembers(const ArrayData& data) {
     for (size_t child_index = 0; child_index < data.child_data.size(); ++child_index) {
       this->child_data[child_index].SetMembers(*data.child_data[child_index]);
     }
+  }
+}
+
+void ArraySpan::FillFromScalar(const Scalar& value) {
+  static const uint8_t kValidByte = 0x01;
+  static const uint8_t kNullByte = 0x00;
+
+  this->type = value.type.get();
+
+  // Populate null count and validity bitmap
+  this->null_count = value.is_valid ? 0 : 1;
+  this->buffers[0].data = const_cast<uint8_t*>(value.is_valid ? &kValidByte : &kNullByte);
+  this->buffers[0].size = 1;
+
+  if (is_primitive(value.type->id())) {
+    const auto& scalar =
+        internal::checked_cast<const internal::PrimitiveScalarBase&>(value);
+    const uint8_t* scalar_data = reinterpret_cast<const uint8_t*>(scalar.data());
+    this->buffers[1].data = const_cast<uint8_t*>(scalar_data);
+    this->buffers[1].size = scalar.type->byte_width();
+  } else {
+    // TODO(wesm): implement for other types
+    DCHECK(false) << "need to implement for other types";
   }
 }
 

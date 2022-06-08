@@ -135,6 +135,9 @@ namespace internal {
 
 struct ARROW_EXPORT PrimitiveScalarBase : public Scalar {
   using Scalar::Scalar;
+  /// \brief Get an immutable pointer to the value of this scalar. May be null.
+  virtual const void* data() const = 0;
+
   /// \brief Get a mutable pointer to the value of this scalar. May be null.
   virtual void* mutable_data() = 0;
   /// \brief Get an immutable view of the value of this scalar as bytes.
@@ -156,6 +159,7 @@ struct ARROW_EXPORT PrimitiveScalar : public PrimitiveScalarBase {
 
   ValueType value{};
 
+  const void* data() const override { return &value; }
   void* mutable_data() override { return &value; }
   util::string_view view() const override {
     return util::string_view(reinterpret_cast<const char*>(&value), sizeof(ValueType));
@@ -239,6 +243,10 @@ struct ARROW_EXPORT BaseBinaryScalar : public internal::PrimitiveScalarBase {
   using ValueType = std::shared_ptr<Buffer>;
 
   std::shared_ptr<Buffer> value;
+
+  const void* data() const override {
+    return value ? reinterpret_cast<const void*>(value->data()) : NULLPTR;
+  }
 
   void* mutable_data() override {
     return value ? reinterpret_cast<void*>(value->mutable_data()) : NULLPTR;
@@ -410,6 +418,10 @@ struct ARROW_EXPORT DecimalScalar : public internal::PrimitiveScalarBase {
   DecimalScalar(ValueType value, std::shared_ptr<DataType> type)
       : internal::PrimitiveScalarBase(std::move(type), true), value(value) {}
 
+  const void* data() const override {
+    return reinterpret_cast<const void*>(value.native_endian_bytes());
+  }
+
   void* mutable_data() override {
     return reinterpret_cast<void*>(value.mutable_native_endian_bytes());
   }
@@ -532,6 +544,10 @@ struct ARROW_EXPORT DictionaryScalar : public internal::PrimitiveScalarBase {
 
   Result<std::shared_ptr<Scalar>> GetEncodedValue() const;
 
+  const void* data() const override {
+    return internal::checked_cast<const internal::PrimitiveScalarBase&>(*value.index)
+        .data();
+  }
   void* mutable_data() override {
     return internal::checked_cast<internal::PrimitiveScalarBase&>(*value.index)
         .mutable_data();

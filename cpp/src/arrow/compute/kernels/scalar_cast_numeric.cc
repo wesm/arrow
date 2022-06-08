@@ -21,6 +21,7 @@
 #include "arrow/compute/kernels/common.h"
 #include "arrow/compute/kernels/scalar_cast_internal.h"
 #include "arrow/compute/kernels/util_internal.h"
+#include "arrow/scalar.h"
 #include "arrow/util/bit_block_counter.h"
 #include "arrow/util/int_util.h"
 #include "arrow/util/value_parsing.h"
@@ -32,6 +33,7 @@ using internal::CheckIntegersInRange;
 using internal::IntegersCanFit;
 using internal::OptionalBitBlockCounter;
 using internal::ParseValue;
+using internal::PrimitiveScalarBase;
 
 namespace compute {
 namespace internal {
@@ -39,8 +41,7 @@ namespace internal {
 Status CastIntegerToInteger(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   const auto& options = checked_cast<const CastState*>(ctx->state())->options;
   if (!options.allow_int_overflow) {
-    /// This uses Datum, should be refactored to use ArraySpan
-    RETURN_NOT_OK(IntegersCanFit(batch[0].array.ToArrayData(), *out->type()));
+    RETURN_NOT_OK(IntegersCanFit(batch[0].array, *out->type()));
   }
   CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
   return Status::OK();
@@ -199,15 +200,21 @@ struct FloatingIntegerBound<double> {
 template <typename InType, typename OutType, typename InT = typename InType::c_type,
           typename OutT = typename OutType::c_type,
           bool IsSigned = is_signed_integer_type<InType>::value>
-Status CheckIntegerFloatTruncateImpl(const Datum& input) {
+Status CheckIntegerFloatTruncateImpl(const ExecValue& input) {
   using InScalarType = typename TypeTraits<InType>::ScalarType;
   const int64_t limit = FloatingIntegerBound<OutT>::value;
   InScalarType bound_lower(IsSigned ? -limit : 0);
   InScalarType bound_upper(limit);
-  return CheckIntegersInRange(input, bound_lower, bound_upper);
+
+  if (input.is_scalar()) {
+    ArraySpan span(*input.scalar);
+    return CheckIntegersInRange(span, bound_lower, bound_upper);
+  } else {
+    return CheckIntegersInRange(input.array, bound_lower, bound_upper);
+  }
 }
 
-Status CheckForIntegerToFloatingTruncation(const Datum& input, Type::type out_type) {
+Status CheckForIntegerToFloatingTruncation(const ExecValue& input, Type::type out_type) {
   switch (input.type()->id()) {
     // Small integers are all exactly representable as whole numbers
     case Type::INT8:
@@ -253,8 +260,7 @@ Status CastIntegerToFloating(KernelContext* ctx, const ExecSpan& batch, ExecResu
   Type::type out_type = out->type()->id();
   if (!options.allow_float_truncate) {
     /// XXX: refactor to not use Datum
-    RETURN_NOT_OK(
-        CheckForIntegerToFloatingTruncation(batch[0].array.ToArrayData(), out_type));
+    RETURN_NOT_OK(CheckForIntegerToFloatingTruncation(batch[0], out_type));
   }
   CastNumberToNumberUnsafe(batch[0].type()->id(), out_type, batch[0], out);
   return Status::OK();

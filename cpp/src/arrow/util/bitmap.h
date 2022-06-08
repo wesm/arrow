@@ -54,7 +54,11 @@ class ARROW_EXPORT Bitmap : public util::ToStringOstreamable<Bitmap>,
   Bitmap() = default;
 
   Bitmap(const std::shared_ptr<Buffer>& buffer, int64_t offset, int64_t length)
-      : data_(buffer->data()), offset_(offset), length_(length) {}
+      : data_(buffer->data()), offset_(offset), length_(length) {
+    if (buffer->is_mutable()) {
+      mutable_data_ = buffer->mutable_data();
+    }
+  }
 
   Bitmap(const void* data, int64_t offset, int64_t length)
       : data_(reinterpret_cast<const uint8_t*>(data)), offset_(offset), length_(length) {}
@@ -455,8 +459,8 @@ class ARROW_EXPORT Bitmap : public util::ToStringOstreamable<Bitmap>,
     return bitmaps[0].length();
   }
 
-  const uint8_t* data_;
-  uint8_t* mutable_data_;
+  const uint8_t* data_ = NULLPTR;
+  uint8_t* mutable_data_ = NULLPTR;
   int64_t offset_ = 0, length_ = 0;
 };
 

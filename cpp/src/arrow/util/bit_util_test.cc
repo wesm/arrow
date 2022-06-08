@@ -2196,7 +2196,7 @@ static Bitmap Copy(const Bitmap& bitmap, std::shared_ptr<Buffer> storage) {
   auto min_offset = Bitmap::VisitWords(bitmaps, [&](std::array<uint64_t, 1> uint64s) {
     reinterpret_cast<uint64_t*>(storage->mutable_data())[i++] = uint64s[0];
   });
-  return Bitmap(std::move(storage), min_offset, bitmap.length());
+  return Bitmap(storage, min_offset, bitmap.length());
 }
 
 // reconstruct a bitmap from a word-wise visit
@@ -2312,13 +2312,14 @@ void DoBitmapVisitAndWrite(int64_t part, bool with_offset) {
   Bitmap bm2(arrow_buffer, part * 2, part);
 
   std::array<Bitmap, 2> out_bms;
+  std::shared_ptr<Buffer> out, out0, out1;
   if (with_offset) {
-    ASSERT_OK_AND_ASSIGN(auto out, AllocateBitmap(part * 4));
+    ASSERT_OK_AND_ASSIGN(out, AllocateBitmap(part * 4));
     out_bms[0] = Bitmap(out, part, part);
     out_bms[1] = Bitmap(out, part * 2, part);
   } else {
-    ASSERT_OK_AND_ASSIGN(auto out0, AllocateBitmap(part));
-    ASSERT_OK_AND_ASSIGN(auto out1, AllocateBitmap(part));
+    ASSERT_OK_AND_ASSIGN(out0, AllocateBitmap(part));
+    ASSERT_OK_AND_ASSIGN(out1, AllocateBitmap(part));
     out_bms[0] = Bitmap(out0, 0, part);
     out_bms[1] = Bitmap(out1, 0, part);
   }

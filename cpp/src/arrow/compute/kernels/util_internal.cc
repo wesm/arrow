@@ -59,6 +59,7 @@ PrimitiveArg GetPrimitiveArg(const ArrayData& arr) {
 
 // TODO(wesm): ARROW-16577: this will be unneeded later
 ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(ScalarKernel::ExecFunc exec,
+                                                      bool use_array_span,
                                                       NullHandling::type null_handling) {
   return [=](KernelContext* ctx, const ExecSpan& span, ExecResult* out) -> Status {
     if (!out->is_scalar()) {
@@ -70,19 +71,31 @@ ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(ScalarKernel::ExecFunc exe
       return Status::OK();
     }
 
+    ExecSpan span_with_arrays;
     ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> array_in,
                           MakeArrayFromScalar(*span[0].scalar, 1));
+    span_with_arrays.length = 1;
+    span_with_arrays.values = {ExecValue(*array_in->data())};
+
     ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> array_out,
                           MakeArrayFromScalar(*out->scalar(), 1));
 
     ExecResult array_result;
-    array_result.value = array_out->data();
 
-    ExecSpan span_with_arrays;
-    span_with_arrays.length = 1;
-    span_with_arrays.values = {ExecValue(*array_in->data())};
-    RETURN_NOT_OK(exec(ctx, span_with_arrays, &array_result));
-    ARROW_ASSIGN_OR_RAISE(out->value, MakeArray(array_result.array_data())->GetScalar(0));
+    // Send either ArraySpan or ArrayData depending on what modality the kernel
+    // is expecting, which we have to specify manually for now
+    if (!use_array_span) {
+      array_result.value = array_out->data();
+      RETURN_NOT_OK(exec(ctx, span_with_arrays, &array_result));
+      ARROW_ASSIGN_OR_RAISE(out->value,
+                            MakeArray(array_result.array_data())->GetScalar(0));
+    } else {
+      ArraySpan* span = array_result.array_span();
+      span->SetMembers(*array_out->data());
+      RETURN_NOT_OK(exec(ctx, span_with_arrays, &array_result));
+      std::shared_ptr<Array> boxed_result = array_result.array_span()->ToArray();
+      ARROW_ASSIGN_OR_RAISE(out->value, boxed_result->GetScalar(0));
+    }
     return Status::OK();
   };
 }

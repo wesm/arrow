@@ -75,7 +75,7 @@ PrimitiveArg GetPrimitiveArg(const ArrayData& arr);
 // far more efficient, but instead of optimizing this it'd be better to support
 // scalar inputs "upstream" in original exec.
 ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(
-    ScalarKernel::ExecFunc exec,
+    ScalarKernel::ExecFunc exec, bool use_array_span = true,
     NullHandling::type null_handling = NullHandling::INTERSECTION);
 
 // Return (min, max) of a numerical array, ignore nulls.

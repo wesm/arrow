@@ -181,9 +181,11 @@ Status OutputAllNull(KernelContext* ctx, const ExecSpan& batch, ExecResult* out)
   if (out->is_scalar()) {
     out->scalar()->is_valid = false;
   } else {
-    ArraySpan* output = out->array_span();
-    DCHECK(output->buffers[0].data == nullptr);
-    DCHECK(output->buffers[0].size == 0);
+    // TODO(wesm): there is no good reason to have to use ArrayData here, so we
+    // should clean this up later. This is used in the dict<null>->null cast
+    DCHECK(out->is_array_data());
+    ArrayData* output = out->array_data().get();
+    output->buffers = {nullptr};
     output->null_count = batch.length;
   }
   return Status::OK();
@@ -253,8 +255,16 @@ Result<ValueDescr> ResolveOutputFromOptions(KernelContext* ctx,
 OutputType kOutputTargetType(ResolveOutputFromOptions);
 
 Status ZeroCopyCastExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
+  // TODO(wesm): alternative strategy for zero copy casts after ARROW-16576
   DCHECK(batch[0].is_array());
-  out->value = batch[0].array;
+  DCHECK(out->is_array_data());
+  std::shared_ptr<ArrayData> input = batch[0].array.ToArrayData();
+  ArrayData* output = out->array_data().get();
+  output->length = input->length;
+  output->offset = input->offset;
+  output->SetNullCount(input->null_count);
+  output->buffers = std::move(input->buffers);
+  output->child_data = std::move(input->child_data);
   return Status::OK();
 }
 
@@ -262,7 +272,8 @@ void AddZeroCopyCast(Type::type in_type_id, InputType in_type, OutputType out_ty
                      CastFunction* func) {
   auto sig = KernelSignature::Make({in_type}, out_type);
   ScalarKernel kernel;
-  kernel.exec = TrivialScalarUnaryAsArraysExec(ZeroCopyCastExec);
+  kernel.exec = TrivialScalarUnaryAsArraysExec(ZeroCopyCastExec,
+                                               /*use_array_span=*/false);
   kernel.signature = sig;
   kernel.null_handling = NullHandling::COMPUTED_NO_PREALLOCATE;
   kernel.mem_allocation = MemAllocation::NO_PREALLOCATE;
@@ -290,7 +301,8 @@ void AddCommonCasts(Type::type out_type_id, OutputType out_ty, CastFunction* fun
     // XXX: Uses Take and does its own memory allocation for the moment. We can
     // fix this later.
     DCHECK_OK(func->AddKernel(Type::DICTIONARY, {InputType(Type::DICTIONARY)}, out_ty,
-                              TrivialScalarUnaryAsArraysExec(UnpackDictionary),
+                              TrivialScalarUnaryAsArraysExec(UnpackDictionary,
+                                                             /*use_array_span=*/false),
                               NullHandling::COMPUTED_NO_PREALLOCATE,
                               MemAllocation::NO_PREALLOCATE));
   }

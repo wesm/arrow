@@ -63,7 +63,7 @@ Status ShiftTime(KernelContext* ctx, const util::DivideOrMultiply factor_op,
 
       int64_t max_val = std::numeric_limits<int64_t>::max() / factor;
       int64_t min_val = std::numeric_limits<int64_t>::min() / factor;
-      if (input.null_count != 0) {
+      if (input.null_count != 0 && input.buffers[0].data != nullptr) {
         BitmapReader bit_reader(input.buffers[0].data, input.offset, input.length);
         for (int64_t i = 0; i < input.length; i++) {
           if (bit_reader.IsSet() && (in_data[i] < min_val || in_data[i] > max_val)) {
@@ -93,7 +93,7 @@ Status ShiftTime(KernelContext* ctx, const util::DivideOrMultiply factor_op,
   return Status::Invalid("Casting from ", input.type->ToString(), " to ", \
                          output->type->ToString(), " would lose data: ", VAL);
 
-      if (input.null_count != 0) {
+      if (input.null_count != 0 && input.buffers[0].data != nullptr) {
         BitmapReader bit_reader(input.buffers[0].data, input.offset, input.length);
         for (int64_t i = 0; i < input.length; i++) {
           out_data[i] = static_cast<out_type>(in_data[i] / factor);
@@ -447,7 +447,8 @@ struct CastFunctor<TimestampType, I, enable_if_t<is_base_binary_type<I>::value>>
 template <typename Type>
 void AddCrossUnitCast(CastFunction* func) {
   ScalarKernel kernel;
-  kernel.exec = TrivialScalarUnaryAsArraysExec(CastFunctor<Type, Type>::Exec);
+  kernel.exec = TrivialScalarUnaryAsArraysExec(CastFunctor<Type, Type>::Exec,
+                                               /*use_array_span=*/true);
   kernel.signature = KernelSignature::Make({InputType(Type::type_id)}, kOutputTargetType);
   DCHECK_OK(func->AddKernel(Type::type_id, std::move(kernel)));
 }

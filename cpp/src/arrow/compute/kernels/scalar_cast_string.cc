@@ -278,10 +278,6 @@ enable_if_base_binary<I, Status> BinaryToBinaryCastExec(KernelContext* ctx,
 
   // Start with a zero-copy cast, but change indices to expected size
   RETURN_NOT_OK(ZeroCopyCastExec(ctx, batch, out));
-
-  // XXX: must switch from ArraySpan to ArrayData because this next
-  // function allocates
-  out->value = out->array_span()->ToArrayData();
   return CastBinaryToBinaryOffsets<typename I::offset_type, typename O::offset_type>(
       ctx, input, out->array_data().get());
 }
@@ -343,7 +339,7 @@ enable_if_t<std::is_same<I, FixedSizeBinaryType>::value &&
                 std::is_same<O, FixedSizeBinaryType>::value,
             Status>
 BinaryToBinaryCastExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-  DCHECK(out->is_array_span());
+  DCHECK(out->is_array_data());
   const CastOptions& options = checked_cast<const CastState&>(*ctx->state()).options;
   const int32_t in_width = batch[0].type()->byte_width();
   const int32_t out_width =
@@ -368,14 +364,16 @@ void AddNumberToStringCasts(CastFunction* func) {
 
   DCHECK_OK(func->AddKernel(Type::BOOL, {boolean()}, out_ty,
                             TrivialScalarUnaryAsArraysExec(
-                                NumericToStringCastFunctor<OutType, BooleanType>::Exec),
+                                NumericToStringCastFunctor<OutType, BooleanType>::Exec,
+                                /*use_array_span=*/false),
                             NullHandling::COMPUTED_NO_PREALLOCATE));
 
   for (const std::shared_ptr<DataType>& in_ty : NumericTypes()) {
     DCHECK_OK(
         func->AddKernel(in_ty->id(), {in_ty}, out_ty,
                         TrivialScalarUnaryAsArraysExec(
-                            GenerateNumeric<NumericToStringCastFunctor, OutType>(*in_ty)),
+                            GenerateNumeric<NumericToStringCastFunctor, OutType>(*in_ty),
+                            /*use_array_span=*/false),
                         NullHandling::COMPUTED_NO_PREALLOCATE));
   }
 }
@@ -387,7 +385,8 @@ void AddTemporalToStringCasts(CastFunction* func) {
     DCHECK_OK(func->AddKernel(
         in_ty->id(), {InputType(in_ty->id())}, out_ty,
         TrivialScalarUnaryAsArraysExec(
-            GenerateTemporal<TemporalToStringCastFunctor, OutType>(*in_ty)),
+            GenerateTemporal<TemporalToStringCastFunctor, OutType>(*in_ty),
+            /*use_array_span=*/false),
         NullHandling::COMPUTED_NO_PREALLOCATE));
   }
 }
@@ -398,7 +397,8 @@ void AddBinaryToBinaryCast(CastFunction* func) {
 
   DCHECK_OK(func->AddKernel(
       InType::type_id, {InputType(InType::type_id)}, out_ty,
-      TrivialScalarUnaryAsArraysExec(BinaryToBinaryCastExec<OutType, InType>),
+      TrivialScalarUnaryAsArraysExec(BinaryToBinaryCastExec<OutType, InType>,
+                                     /*use_array_span=*/false),
       NullHandling::COMPUTED_NO_PREALLOCATE));
 }
 
@@ -444,7 +444,8 @@ std::vector<std::shared_ptr<CastFunction>> GetBinaryLikeCasts() {
       Type::FIXED_SIZE_BINARY, {InputType(Type::FIXED_SIZE_BINARY)},
       OutputType(FirstType),
       TrivialScalarUnaryAsArraysExec(
-          BinaryToBinaryCastExec<FixedSizeBinaryType, FixedSizeBinaryType>),
+          BinaryToBinaryCastExec<FixedSizeBinaryType, FixedSizeBinaryType>,
+          /*use_array_span=*/false),
       NullHandling::COMPUTED_NO_PREALLOCATE));
 
   return {cast_binary, cast_large_binary, cast_string, cast_large_string, cast_fsb};

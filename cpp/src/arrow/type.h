@@ -189,7 +189,7 @@ class ARROW_EXPORT DataType : public std::enable_shared_from_this<DataType>,
   virtual int bit_width() const { return -1; }
 
   // \brief EXPERIMENTAL: Enable retrieving shared_ptr<DataType> from a const
-  // context. Consider renaming
+  // context. Consider renaming or removing in favor of a Copy method
   std::shared_ptr<DataType> GetSharedPtr() const {
     return const_cast<DataType*>(this)->shared_from_this();
   }

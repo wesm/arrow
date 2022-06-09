@@ -211,17 +211,12 @@ Status CastFromExtension(KernelContext* ctx, const ExecSpan& batch, ExecResult* 
     out->value = std::move(result.scalar());
   } else {
     DCHECK(batch[0].is_array());
-
-    // TODO(wesm): this is unpleasant -- surely there is a better way?
-
-    ArraySpan copy = batch[0].array;
-    copy.type = checked_cast<const ExtensionType*>(copy.type)->storage_type().get();
-    std::shared_ptr<ArrayData> data = copy.ToArrayData();
-    ExtensionArray extension(data);
+    ExtensionArray extension(batch[0].array.ToArrayData());
+    std::shared_ptr<Array> result;
     RETURN_NOT_OK(Cast(*extension.storage(), out->type()->GetSharedPtr(), options,
                        ctx->exec_context())
                       .Value(&result));
-    out->value = std::move(result.array());
+    out->value = std::move(result->data());
   }
   return Status::OK();
 }

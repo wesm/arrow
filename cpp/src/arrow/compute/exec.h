@@ -325,11 +325,8 @@ struct ExecValue {
 
 struct ARROW_EXPORT ExecResult {
   // The default value of the variant is ArraySpan
+  // TODO(wesm): remove Scalar output modality in ARROW-16577
   util::Variant<ArraySpan, std::shared_ptr<ArrayData>, std::shared_ptr<Scalar>> value;
-
-  ExecValue::Kind kind() const {
-    return is_scalar() ? ExecValue::SCALAR : ExecValue::ARRAY;
-  }
 
   int64_t length() const {
     if (this->is_array_span()) {

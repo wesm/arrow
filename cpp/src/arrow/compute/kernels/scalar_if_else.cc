@@ -41,21 +41,6 @@ namespace internal {
 
 namespace {
 
-constexpr uint64_t kAllNull = 0;
-constexpr uint64_t kAllValid = ~kAllNull;
-
-util::optional<uint64_t> GetConstantValidityWord(const ExecValue& data) {
-  if (data.is_scalar()) {
-    return data.scalar->is_valid ? kAllValid : kAllNull;
-  }
-
-  if (data.array.null_count == data.array.length) return kAllNull;
-  if (!data.array.MayHaveNulls()) return kAllValid;
-
-  // no constant validity word available
-  return {};
-}
-
 inline Bitmap GetBitmap(const ExecValue& val, int i) {
   if (val.is_array()) {
     return Bitmap{val.array.buffers[i].data, val.array.offset, val.array.length};
@@ -79,183 +64,239 @@ Status CheckIdenticalTypes(const ExecValue* begin, int count) {
   return Status::OK();
 }
 
+constexpr uint64_t kAllNull = 0;
+constexpr uint64_t kAllValid = ~kAllNull;
+
+util::optional<uint64_t> GetConstantValidityWord(const ExecValue& data) {
+  if (data.is_scalar()) {
+    return data.scalar->is_valid ? kAllValid : kAllNull;
+  }
+
+  if (data.array.null_count == data.array.length) return kAllNull;
+  if (!data.array.MayHaveNulls()) return kAllValid;
+
+  // no constant validity word available
+  return {};
+}
+
 // if the condition is null then output is null otherwise we take validity from the
 // selected argument
 // ie. cond.valid & (cond.data & left.valid | ~cond.data & right.valid)
-template <typename AllocateNullBitmap>
-Status PromoteNullsVisitor(KernelContext* ctx, const ExecValue& cond_d,
-                           const ExecValue& left_d, const ExecValue& right_d,
-                           ExecResult* output) {
-  auto cond_const = GetConstantValidityWord(cond_d);
-  auto left_const = GetConstantValidityWord(left_d);
-  auto right_const = GetConstantValidityWord(right_d);
+struct IfElseNullPromoter {
+  KernelContext* ctx;
+  const ArraySpan& cond;
+  const ExecValue& left_d;
+  const ExecValue& right_d;
+  ExecResult* output;
 
   enum { COND_CONST = 1, LEFT_CONST = 2, RIGHT_CONST = 4 };
-  auto flag = COND_CONST * cond_const.has_value() | LEFT_CONST * left_const.has_value() |
-              RIGHT_CONST * right_const.has_value();
+  int64_t constant_validity_flag;
+  util::optional<uint64_t> cond_const, left_const, right_const;
+  Bitmap cond_data, cond_valid, left_valid, right_valid;
 
-  const ArraySpan& cond = cond_d.array;
-  // cond.data will always be available / is always an array
-  Bitmap cond_data{cond.buffers[1].data, cond.offset, cond.length};
-  Bitmap cond_valid{cond.buffers[0].data, cond.offset, cond.length};
-  Bitmap left_valid = GetBitmap(left_d, 0);
-  Bitmap right_valid = GetBitmap(right_d, 0);
+  IfElseNullPromoter(KernelContext* ctx, const ExecValue& cond_d, const ExecValue& left_d,
+                     const ExecValue& right_d, ExecResult* output)
+      : ctx(ctx), cond(cond_d.array), left_d(left_d), right_d(right_d), output(output) {
+    cond_const = GetConstantValidityWord(cond_d);
+    left_const = GetConstantValidityWord(left_d);
+    right_const = GetConstantValidityWord(right_d);
 
-  // cond.valid & (cond.data & left.valid | ~cond.data & right.valid)
-  // In the following cases, we dont need to allocate out_valid bitmap
+    // Encodes whether each of the arguments is respectively all-null or
+    // all-valid
+    constant_validity_flag =
+        (COND_CONST * cond_const.has_value() | LEFT_CONST * left_const.has_value() |
+         RIGHT_CONST * right_const.has_value());
 
-  // if cond & left & right all ones, then output is all valid.
-  // if output validity buffer is already allocated (NullHandling::
-  // COMPUTED_PREALLOCATE) -> set all bits
-  // else, return nullptr
-  if (cond_const == kAllValid && left_const == kAllValid && right_const == kAllValid) {
-    if (AllocateNullBitmap::value) {  // NullHandling::COMPUTED_NO_PREALLOCATE
-      output->array_data()->buffers[0] = nullptr;
-    } else {  // NullHandling::COMPUTED_PREALLOCATE
-      ArraySpan* out_span = output->array_span();
-      bit_util::SetBitmap(out_span->buffers[0].data, out_span->offset, out_span->length);
+    // cond.data will always be available / is always an array
+    cond_data = Bitmap{cond.buffers[1].data, cond.offset, cond.length};
+    cond_valid = Bitmap{cond.buffers[0].data, cond.offset, cond.length};
+    left_valid = GetBitmap(left_d, 0);
+    right_valid = GetBitmap(right_d, 0);
+  }
+
+  Status ExecIntoArrayData(bool need_to_allocate) {
+    ArrayData* out_arr = output->array_data().get();
+
+    // cond.valid & (cond.data & left.valid | ~cond.data & right.valid)
+    // In the following cases, we dont need to allocate out_valid bitmap
+
+    // if cond & left & right all ones, then output is all valid.
+    // if output validity buffer is already allocated (NullHandling::
+    // COMPUTED_PREALLOCATE) -> set all bits
+    // else, return nullptr
+    if (cond_const == kAllValid && left_const == kAllValid && right_const == kAllValid) {
+      if (need_to_allocate) {  // NullHandling::COMPUTED_NO_PREALLOCATE
+        out_arr->buffers[0] = nullptr;
+      } else {  // NullHandling::COMPUTED_PREALLOCATE
+        bit_util::SetBitmap(out_arr->buffers[0]->mutable_data(), out_arr->offset,
+                            out_arr->length);
+      }
+    } else if (left_const == kAllValid && right_const == kAllValid) {
+      // if both left and right are valid, no need to calculate out_valid bitmap. Copy
+      // cond validity buffer
+      if (need_to_allocate) {  // NullHandling::COMPUTED_NO_PREALLOCATE
+        // if there's an offset, copy bitmap (cannot slice a bitmap)
+        if (cond.offset) {
+          ARROW_ASSIGN_OR_RAISE(
+              out_arr->buffers[0],
+              arrow::internal::CopyBitmap(ctx->memory_pool(), cond.buffers[0].data,
+                                          cond.offset, cond.length));
+        } else {
+          // just copy assign cond validity buffer
+          out_arr->buffers[0] = cond.GetBuffer(0);
+        }
+      } else {  // NullHandling::COMPUTED_PREALLOCATE
+        arrow::internal::CopyBitmap(cond.buffers[0].data, cond.offset, cond.length,
+                                    out_arr->buffers[0]->mutable_data(), out_arr->offset);
+      }
+    } else {
+      if (need_to_allocate) {
+        // following cases requires a separate out_valid buffer. COMPUTED_NO_PREALLOCATE
+        // would not have allocated buffers for it.
+        ARROW_ASSIGN_OR_RAISE(out_arr->buffers[0], ctx->AllocateBitmap(cond.length));
+      }
+      WriteOutput(
+          Bitmap{out_arr->buffers[0]->mutable_data(), out_arr->offset, out_arr->length});
     }
     return Status::OK();
   }
 
-  if (left_const == kAllValid && right_const == kAllValid) {
-    // if both left and right are valid, no need to calculate out_valid bitmap. Copy
-    // cond validity buffer
-    if (AllocateNullBitmap::value) {  // NullHandling::COMPUTED_NO_PREALLOCATE
-      // if there's an offset, copy bitmap (cannot slice a bitmap)
-      if (cond.offset) {
-        ARROW_ASSIGN_OR_RAISE(
-            output->array_data()->buffers[0],
-            arrow::internal::CopyBitmap(ctx->memory_pool(), cond.buffers[0].data,
-                                        cond.offset, cond.length));
-      } else {  // just copy assign cond validity buffer
-        output->array_data()->buffers[0];
-      }
-    } else {  // NullHandling::COMPUTED_PREALLOCATE
-      ArraySpan* out_span = output->array_span();
+  Status ExecIntoArraySpan() {
+    ArraySpan* out_span = output->array_span();
+
+    // cond.valid & (cond.data & left.valid | ~cond.data & right.valid)
+    // In the following cases, we dont need to allocate out_valid bitmap
+
+    // if cond & left & right all ones, then output is all valid, so set all
+    // bits
+    if (cond_const == kAllValid && left_const == kAllValid && right_const == kAllValid) {
+      bit_util::SetBitmap(out_span->buffers[0].data, out_span->offset, out_span->length);
+    } else if (left_const == kAllValid && right_const == kAllValid) {
+      // if both left and right are valid, no need to calculate out_valid
+      // bitmap. Copy cond validity buffer
       arrow::internal::CopyBitmap(cond.buffers[0].data, cond.offset, cond.length,
                                   out_span->buffers[0].data, out_span->offset);
+    } else {
+      WriteOutput(Bitmap{out_span->buffers[0].data, out_span->offset, out_span->length});
     }
     return Status::OK();
   }
 
-  // lambda function that will be used inside the visitor
-  auto apply = [&](uint64_t c_valid, uint64_t c_data, uint64_t l_valid,
-                   uint64_t r_valid) {
-    return c_valid & ((c_data & l_valid) | (~c_data & r_valid));
-  };
-
-  uint8_t* out_bitmap_data = nullptr;
-  int64_t out_length = -1;
-  int64_t out_offset = -1;
-  if (AllocateNullBitmap::value) {
-    // following cases requires a separate out_valid buffer. COMPUTED_NO_PREALLOCATE
-    // would not have allocated buffers for it.
-    ArrayData* out_arr = output->array_data().get();
-    ARROW_ASSIGN_OR_RAISE(out_arr->buffers[0], ctx->AllocateBitmap(cond.length));
-    out_bitmap_data = out_arr->buffers[0]->mutable_data();
-    out_length = out_arr->length;
-    out_offset = out_arr->offset;
-  } else {
-    ArraySpan* out_span = output->array_span();
-    out_bitmap_data = out_span->buffers[0].data;
-    out_length = out_span->length;
-    out_offset = out_span->offset;
-  }
-
-  std::array<Bitmap, 1> out_bitmaps{Bitmap{out_bitmap_data, out_offset, out_length}};
-
-  switch (flag) {
-    case COND_CONST | LEFT_CONST | RIGHT_CONST: {
-      std::array<Bitmap, 1> bitmaps{cond_data};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 1>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(*cond_const, words_in[0],
-                                                           *left_const, *right_const);
-                                 });
-      break;
-    }
-    case LEFT_CONST | RIGHT_CONST: {
-      std::array<Bitmap, 2> bitmaps{cond_valid, cond_data};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 2>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(words_in[0], words_in[1],
-                                                           *left_const, *right_const);
-                                 });
-      break;
-    }
-    case COND_CONST | RIGHT_CONST: {
-      // bitmaps[C_VALID], bitmaps[R_VALID] might be null; override to make it safe for
-      // Visit()
-      std::array<Bitmap, 2> bitmaps{cond_data, left_valid};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 2>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(*cond_const, words_in[0],
-                                                           words_in[1], *right_const);
-                                 });
-      break;
-    }
-    case RIGHT_CONST: {
-      // bitmaps[R_VALID] might be null; override to make it safe for Visit()
-      std::array<Bitmap, 3> bitmaps{cond_valid, cond_data, left_valid};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 3>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(words_in[0], words_in[1],
-                                                           words_in[2], *right_const);
-                                 });
-      break;
-    }
-    case COND_CONST | LEFT_CONST: {
-      // bitmaps[C_VALID], bitmaps[L_VALID] might be null; override to make it safe for
-      // Visit()
-      std::array<Bitmap, 2> bitmaps{cond_data, right_valid};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 2>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(*cond_const, words_in[0],
-                                                           *left_const, words_in[1]);
-                                 });
-      break;
-    }
-    case LEFT_CONST: {
-      // bitmaps[L_VALID] might be null; override to make it safe for Visit()
-      std::array<Bitmap, 3> bitmaps{cond_valid, cond_data, right_valid};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 3>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(words_in[0], words_in[1],
-                                                           *left_const, words_in[2]);
-                                 });
-      break;
-    }
-    case COND_CONST: {
-      // bitmaps[C_VALID] might be null; override to make it safe for Visit()
-      std::array<Bitmap, 3> bitmaps{cond_data, left_valid, right_valid};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 3>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(*cond_const, words_in[0],
-                                                           words_in[1], words_in[2]);
-                                 });
-      break;
-    }
-    case 0: {
-      std::array<Bitmap, 4> bitmaps{cond_valid, cond_data, left_valid, right_valid};
-      Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
-                                 [&](const std::array<uint64_t, 4>& words_in,
-                                     std::array<uint64_t, 1>* word_out) {
-                                   word_out->at(0) = apply(words_in[0], words_in[1],
-                                                           words_in[2], words_in[3]);
-                                 });
-      break;
+  Status Exec(bool need_to_allocate) {
+    if (output->is_array_data()) {
+      return ExecIntoArrayData(need_to_allocate);
+    } else {
+      if (need_to_allocate) {
+        // TODO: turn this into a DCHECK, but have this strong error to be
+        // helpful for now
+        return Status::Invalid(
+            "Conditional kernel writing into array span must "
+            "preallocate validity bitmap");
+      }
+      return ExecIntoArraySpan();
     }
   }
-  return Status::OK();
-}
+
+  void WriteOutput(Bitmap out_bitmap) {
+    // lambda function that will be used inside the visitor
+    auto apply = [&](uint64_t c_valid, uint64_t c_data, uint64_t l_valid,
+                     uint64_t r_valid) {
+      return c_valid & ((c_data & l_valid) | (~c_data & r_valid));
+    };
+
+    std::array<Bitmap, 1> out_bitmaps{out_bitmap};
+
+    switch (this->constant_validity_flag) {
+      case COND_CONST | LEFT_CONST | RIGHT_CONST: {
+        std::array<Bitmap, 1> bitmaps{cond_data};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 1>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(*cond_const, words_in[0],
+                                                             *left_const, *right_const);
+                                   });
+        break;
+      }
+      case LEFT_CONST | RIGHT_CONST: {
+        std::array<Bitmap, 2> bitmaps{cond_valid, cond_data};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 2>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(words_in[0], words_in[1],
+                                                             *left_const, *right_const);
+                                   });
+        break;
+      }
+      case COND_CONST | RIGHT_CONST: {
+        // bitmaps[C_VALID], bitmaps[R_VALID] might be null; override to make it safe for
+        // Visit()
+        std::array<Bitmap, 2> bitmaps{cond_data, left_valid};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 2>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(*cond_const, words_in[0],
+                                                             words_in[1], *right_const);
+                                   });
+        break;
+      }
+      case RIGHT_CONST: {
+        // bitmaps[R_VALID] might be null; override to make it safe for Visit()
+        std::array<Bitmap, 3> bitmaps{cond_valid, cond_data, left_valid};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 3>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(words_in[0], words_in[1],
+                                                             words_in[2], *right_const);
+                                   });
+        break;
+      }
+      case COND_CONST | LEFT_CONST: {
+        // bitmaps[C_VALID], bitmaps[L_VALID] might be null; override to make it safe for
+        // Visit()
+        std::array<Bitmap, 2> bitmaps{cond_data, right_valid};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 2>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(*cond_const, words_in[0],
+                                                             *left_const, words_in[1]);
+                                   });
+        break;
+      }
+      case LEFT_CONST: {
+        // bitmaps[L_VALID] might be null; override to make it safe for Visit()
+        std::array<Bitmap, 3> bitmaps{cond_valid, cond_data, right_valid};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 3>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(words_in[0], words_in[1],
+                                                             *left_const, words_in[2]);
+                                   });
+        break;
+      }
+      case COND_CONST: {
+        // bitmaps[C_VALID] might be null; override to make it safe for Visit()
+        std::array<Bitmap, 3> bitmaps{cond_data, left_valid, right_valid};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 3>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(*cond_const, words_in[0],
+                                                             words_in[1], words_in[2]);
+                                   });
+        break;
+      }
+      case 0: {
+        std::array<Bitmap, 4> bitmaps{cond_valid, cond_data, left_valid, right_valid};
+        Bitmap::VisitWordsAndWrite(bitmaps, &out_bitmaps,
+                                   [&](const std::array<uint64_t, 4>& words_in,
+                                       std::array<uint64_t, 1>* word_out) {
+                                     word_out->at(0) = apply(words_in[0], words_in[1],
+                                                             words_in[2], words_in[3]);
+                                   });
+        break;
+      }
+    }
+  }
+};
 
 using Word = uint64_t;
 static constexpr int64_t word_len = sizeof(Word) * 8;
@@ -640,7 +681,7 @@ static Status IfElseGenericSXXCall(KernelContext* ctx, const BooleanScalar& cond
 
   const ExecValue& valid_data = cond.value ? left : right;
   if (valid_data.is_array()) {
-    out->value = valid_data.array;
+    out->value = valid_data.array.ToArrayData();
   } else {
     // valid data is a scalar that needs to be broadcasted
     ARROW_ASSIGN_OR_RAISE(
@@ -668,9 +709,7 @@ struct IfElseFunctor<Type, enable_if_base_binary<Type>> {
   static Status WrapResult(BuilderType* builder, ArrayData* out) {
     ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> out_arr, builder->Finish());
     out->SetNullCount(out_arr->data()->null_count);
-    out->buffers[0] = std::move(out_arr->data()->buffers[0]);
-    out->buffers[1] = std::move(out_arr->data()->buffers[1]);
-    out->buffers[2] = std::move(out_arr->data()->buffers[2]);
+    out->buffers = std::move(out_arr->data()->buffers);
     return Status::OK();
   }
 
@@ -1108,9 +1147,10 @@ struct ResolveIfElseExec {
       return IfElseFunctor<Type>::Call(ctx, cond, batch[1], batch[2], out);
     }
 
-    // cond is array. Use functors to sort things out
-    ARROW_RETURN_NOT_OK(
-        PromoteNullsVisitor<AllocateMem>(ctx, batch[0], batch[1], batch[2], out));
+    // cond is array. Compute the output validity bitmap and then invoke the
+    // correct functor
+    IfElseNullPromoter null_promoter(ctx, batch[0], batch[1], batch[2], out);
+    ARROW_RETURN_NOT_OK(null_promoter.Exec(AllocateMem::value));
 
     if (batch[1].is_array()) {
       if (batch[2].is_array()) {  // AAA

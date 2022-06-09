@@ -207,10 +207,9 @@ int64_t ArraySpan::GetNullCount() const {
   return precomputed;
 }
 
-int ArraySpan::num_buffers() const {
-  switch (this->type->id()) {
+int GetNumBuffers(const DataType& type) {
+  switch (type.id()) {
     case Type::NA:
-    case Type::EXTENSION:
       return 0;
     case Type::STRUCT:
     case Type::FIXED_SIZE_LIST:
@@ -221,11 +220,17 @@ int ArraySpan::num_buffers() const {
     case Type::LARGE_STRING:
     case Type::DENSE_UNION:
       return 3;
+    case Type::EXTENSION:
+      // The number of buffers depends on the storage type
+      return GetNumBuffers(
+          *internal::checked_cast<const ExtensionType&>(type).storage_type());
     default:
       // Everything else has 2 buffers
       return 2;
   }
 }
+
+int ArraySpan::num_buffers() const { return GetNumBuffers(*this->type); }
 
 std::shared_ptr<ArrayData> ArraySpan::ToArrayData() const {
   auto result = std::make_shared<ArrayData>(this->type->GetSharedPtr(), this->length,

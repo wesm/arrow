@@ -174,6 +174,7 @@ void ArraySpan::FillFromScalar(const Scalar& value) {
   static const uint8_t kNullByte = 0x00;
 
   this->type = value.type.get();
+  this->length = 1;
 
   // Populate null count and validity bitmap
   this->null_count = value.is_valid ? 0 : 1;

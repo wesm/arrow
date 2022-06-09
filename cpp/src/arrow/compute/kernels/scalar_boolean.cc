@@ -33,7 +33,7 @@ namespace {
 template <typename ComputeWord>
 void ComputeKleene(ComputeWord&& compute_word, KernelContext* ctx, const ArraySpan& left,
                    const ArraySpan& right, ArraySpan* out) {
-  DCHECK(left.null_count != 0 || right.null_count != 0)
+  DCHECK(left.GetNullCount() != 0 || right.GetNullCount() != 0)
       << "ComputeKleene is unnecessarily expensive for the non-null case";
 
   Bitmap left_valid_bm{left.buffers[0].data, left.offset, left.length};
@@ -56,7 +56,7 @@ void ComputeKleene(ComputeWord&& compute_word, KernelContext* ctx, const ArraySp
     compute_word(left_true, left_false, right_true, right_false, out_validity, out_data);
   };
 
-  if (right.null_count == 0) {
+  if (right.GetNullCount() == 0) {
     std::array<Bitmap, 3> in_bms{left_valid_bm, left_data_bm, right_data_bm};
     Bitmap::VisitWordsAndWrite(
         in_bms, &out_bms,
@@ -66,7 +66,7 @@ void ComputeKleene(ComputeWord&& compute_word, KernelContext* ctx, const ArraySp
     return;
   }
 
-  if (left.null_count == 0) {
+  if (left.GetNullCount() == 0) {
     std::array<Bitmap, 3> in_bms{left_data_bm, right_valid_bm, right_data_bm};
     Bitmap::VisitWordsAndWrite(
         in_bms, &out_bms,
@@ -76,7 +76,7 @@ void ComputeKleene(ComputeWord&& compute_word, KernelContext* ctx, const ArraySp
     return;
   }
 
-  DCHECK(left.null_count != 0 && right.null_count != 0);
+  DCHECK(left.GetNullCount() != 0 && right.GetNullCount() != 0);
   std::array<Bitmap, 4> in_bms{left_valid_bm, left_data_bm, right_valid_bm,
                                right_data_bm};
   Bitmap::VisitWordsAndWrite(
@@ -174,6 +174,7 @@ struct KleeneAndOp : Commutative<KleeneAndOp> {
     bool right_false = right.is_valid && !checked_cast<const BooleanScalar&>(right).value;
 
     if (right_false) {
+      GetBitmap(*out_span, 0).SetBitsTo(true);
       out_span->null_count = 0;
       GetBitmap(*out_span, 1).SetBitsTo(false);  // all false case
       return Status::OK();
@@ -283,6 +284,7 @@ struct KleeneOrOp : Commutative<KleeneOrOp> {
     bool right_false = right.is_valid && !checked_cast<const BooleanScalar&>(right).value;
 
     if (right_true) {
+      GetBitmap(*out_span, 0).SetBitsTo(true);
       out_span->null_count = 0;
       GetBitmap(*out_span, 1).SetBitsTo(true);  // all true case
       return Status::OK();
@@ -414,6 +416,7 @@ struct KleeneAndNotOp {
     bool left_false = left.is_valid && !checked_cast<const BooleanScalar&>(left).value;
 
     if (left_false) {
+      GetBitmap(*out_span, 0).SetBitsTo(true);
       out_span->null_count = 0;
       GetBitmap(*out_span, 1).SetBitsTo(false);  // all false case
       return Status::OK();
@@ -563,11 +566,11 @@ void RegisterScalarBoolean(FunctionRegistry* registry) {
   MakeFunction("or", 2, applicator::SimpleBinary<OrOp>, or_doc, registry);
   MakeFunction("xor", 2, applicator::SimpleBinary<XorOp>, xor_doc, registry);
   MakeFunction("and_kleene", 2, applicator::SimpleBinary<KleeneAndOp>, and_kleene_doc,
-               registry);
+               registry, NullHandling::COMPUTED_PREALLOCATE);
   MakeFunction("and_not_kleene", 2, applicator::SimpleBinary<KleeneAndNotOp>,
-               and_not_kleene_doc, registry);
+               and_not_kleene_doc, registry, NullHandling::COMPUTED_PREALLOCATE);
   MakeFunction("or_kleene", 2, applicator::SimpleBinary<KleeneOrOp>, or_kleene_doc,
-               registry);
+               registry, NullHandling::COMPUTED_PREALLOCATE);
 }
 
 }  // namespace internal

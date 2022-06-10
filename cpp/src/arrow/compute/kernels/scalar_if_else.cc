@@ -2633,13 +2633,19 @@ struct ChooseFunctor<Type, enable_if_base_binary<Type>> {
       if (index < 0 || (index + 1) >= batch.num_values()) {
         return Status::IndexError("choose: index ", index, " out of range");
       }
-      auto source = batch.values[index + 1];
-      if (source.is_scalar() && out->is_array_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            std::shared_ptr<Array> temp_array,
-            MakeArrayFromScalar(*source.scalar, batch.length, ctx->memory_pool()));
-        out->value = std::move(temp_array->data());
+      const ExecValue& source = batch.values[index + 1];
+      if (source.is_scalar()) {
+        if (out->is_array_data()) {
+          ARROW_ASSIGN_OR_RAISE(
+              std::shared_ptr<Array> temp_array,
+              MakeArrayFromScalar(*source.scalar, batch.length, ctx->memory_pool()));
+          out->value = std::move(temp_array->data());
+        } else {
+          DCHECK(out->is_scalar());
+          out->value = source.scalar->GetSharedPtr();
+        }
       } else {
+        DCHECK(out->is_array_data());
         // source is an array
         // TODO(wesm): avoiding ToArrayData()
         out->value = source.array.ToArrayData();
@@ -2681,9 +2687,10 @@ struct ChooseFunctor<Type, enable_if_base_binary<Type>> {
         }));
     std::shared_ptr<Array> temp_output;
     RETURN_NOT_OK(builder.Finish(&temp_output));
+    std::shared_ptr<DataType> actual_result_type = out->type()->GetSharedPtr();
     out->value = std::move(temp_output->data());
     // Builder type != logical type due to GenerateTypeAgnosticVarBinaryBase
-    out->array_data()->type = out->type()->GetSharedPtr();
+    out->array_data()->type = std::move(actual_result_type);
     return Status::OK();
   }
 

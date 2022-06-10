@@ -569,8 +569,8 @@ const ArrayVector& StructArray::fields() const {
   return boxed_fields_;
 }
 
-const std::shared_ptr<Array>& StructArray::field(int i) const {
-  const std::shared_ptr<Array>& result = internal::atomic_load(&boxed_fields_[i]);
+std::shared_ptr<Array> StructArray::field(int i) const {
+  std::shared_ptr<Array> result = internal::atomic_load(&boxed_fields_[i]);
   if (!result) {
     std::shared_ptr<ArrayData> field_data;
     if (data_->offset != 0 || data_->child_data[i]->length != data_->length) {
@@ -580,7 +580,7 @@ const std::shared_ptr<Array>& StructArray::field(int i) const {
     }
     std::shared_ptr<Array> result = MakeArray(field_data);
     internal::atomic_store(&boxed_fields_[i], result);
-    return boxed_fields_[i];
+    return result;
   }
   return result;
 }

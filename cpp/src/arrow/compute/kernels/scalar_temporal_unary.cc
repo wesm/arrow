@@ -1291,15 +1291,17 @@ struct Strptime {
     ArraySpan* out_span = out->array_span();
     int64_t* out_data = out_span->GetValues<int64_t>(1);
 
-    // Set all values to non-null, and only clear bits when there is a
-    // parsing error
-    bit_util::SetBitmap(out_span->buffers[0].data, out_span->offset, out_span->length);
     if (self.error_is_null) {
+      // Set all values to non-null, and only clear bits when there is a
+      // parsing error
+      bit_util::SetBitmap(out_span->buffers[0].data, out_span->offset, out_span->length);
+
       int64_t null_count = 0;
       arrow::internal::BitmapWriter out_writer(out_span->buffers[0].data,
                                                out_span->offset, out_span->length);
       auto visit_null = [&]() {
         *out_data++ = 0;
+        out_writer.Clear();
         out_writer.Next();
         null_count++;
       };
@@ -1318,6 +1320,14 @@ struct Strptime {
       out_writer.Finish();
       out_span->null_count = null_count;
     } else {
+      if (in.buffers[0].data != nullptr) {
+        ::arrow::internal::CopyBitmap(in.buffers[0].data, in.offset, in.length,
+                                      out_span->buffers[0].data, out_span->offset);
+      } else {
+        // Input is all non-null
+        bit_util::SetBitmap(out_span->buffers[0].data, out_span->offset,
+                            out_span->length);
+      }
       auto visit_null = [&]() {
         *out_data++ = 0;
         return Status::OK();

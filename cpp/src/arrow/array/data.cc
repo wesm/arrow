@@ -244,6 +244,13 @@ std::shared_ptr<ArrayData> ArraySpan::ToArrayData() const {
     }
   }
 
+  if (this->type->id() == Type::NA) {
+    result->null_count = this->length;
+  } else if (this->buffers[0].data == nullptr) {
+    // No validity bitmap, so the null count is 0
+    result->null_count = 0;
+  }
+
   // TODO(wesm): what about extension arrays?
 
   if (this->type->id() == Type::DICTIONARY) {

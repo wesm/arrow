@@ -1474,25 +1474,46 @@ Status ExecScalarCaseWhen(KernelContext* ctx, const ExecSpan& batch, ExecResult*
     return Status::OK();
   }
 
-  const std::shared_ptr<ArrayData>& output = out->array_data();
-  if (is_dictionary_type<Type>::value) {
-    const ExecValue& dict_from = has_result ? result : batch[1];
-    if (dict_from.is_scalar()) {
-      output->dictionary = checked_cast<const DictionaryScalar&>(*dict_from.scalar)
-                               .value.dictionary->data();
-    } else {
-      output->dictionary = dict_from.array.ToArrayData()->dictionary;
-    }
-  }
   std::shared_ptr<Scalar> temp;
-  if (has_result) {
+  if (!has_result) {
     // All conditions false, no 'else' argument
     temp = MakeNullScalar(out->type()->GetSharedPtr());
     result = temp.get();
   }
-  CopyValues<Type>(result, /*in_offset=*/0, batch.length,
-                   output->GetMutableValues<uint8_t>(0, 0),
-                   output->GetMutableValues<uint8_t>(1, 0), output->offset);
+
+  // TODO(wesm): clean this up to have less duplication
+  if (out->is_array_data()) {
+    ArrayData* output = out->array_data().get();
+    if (is_dictionary_type<Type>::value) {
+      const ExecValue& dict_from = has_result ? result : batch[1];
+      if (dict_from.is_scalar()) {
+        output->dictionary = checked_cast<const DictionaryScalar&>(*dict_from.scalar)
+                                 .value.dictionary->data();
+      } else {
+        output->dictionary = dict_from.array.ToArrayData()->dictionary;
+      }
+    }
+    CopyValues<Type>(result, /*in_offset=*/0, batch.length,
+                     output->GetMutableValues<uint8_t>(0, 0),
+                     output->GetMutableValues<uint8_t>(1, 0), output->offset);
+  } else {
+    // ArraySpan
+    ArraySpan* output = out->array_span();
+    if (is_dictionary_type<Type>::value) {
+      const ExecValue& dict_from = has_result ? result : batch[1];
+      output->child_data.resize(1);
+      if (dict_from.is_scalar()) {
+        output->child_data[0].SetMembers(
+            *checked_cast<const DictionaryScalar&>(*dict_from.scalar)
+                 .value.dictionary->data());
+      } else {
+        output->child_data[0] = dict_from.array;
+      }
+    }
+    CopyValues<Type>(result, /*in_offset=*/0, batch.length,
+                     output->GetValues<uint8_t>(0, 0), output->GetValues<uint8_t>(1, 0),
+                     output->offset);
+  }
   return Status::OK();
 }
 
@@ -1658,7 +1679,7 @@ Status ExecVarWidthScalarCaseWhen(KernelContext* ctx, const ExecSpan& batch,
                                     : MakeNullScalar(out->type()->GetSharedPtr());
     return Status::OK();
   }
-  if (has_result) {
+  if (!has_result) {
     // All conditions false, no 'else' argument
     ARROW_ASSIGN_OR_RAISE(
         std::shared_ptr<Array> array,

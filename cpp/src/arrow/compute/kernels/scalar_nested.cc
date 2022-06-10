@@ -562,11 +562,12 @@ struct MapLookupFunctor {
 
         bool found_at_least_one_key = false;
         RETURN_NOT_OK(FindMatchingIndices(map_keys, query_key, [&](int64_t key_index) {
-          if (!found_at_least_one_key) RETURN_NOT_OK(list_builder->Append(true));
+          if (!found_at_least_one_key) {
+            RETURN_NOT_OK(list_builder->Append(true));
+          }
           found_at_least_one_key = true;
           return value_builder->AppendArraySlice(map_items, item_offset + key_index, 1);
         }));
-
         if (!found_at_least_one_key) {
           // Key was not found in this map element, so we append a null list
           RETURN_NOT_OK(list_builder->AppendNull());
@@ -615,7 +616,8 @@ struct MapLookupFunctor {
     const auto& options = OptionsWrapper<MapLookupOptions>::Get(ctx);
     UnboxedKey query_key = UnboxScalar<KeyType>::Unbox(*options.query_key);
 
-    const auto& item_type = checked_cast<const MapType*>(batch[0].type())->item_type();
+    std::shared_ptr<DataType> item_type =
+        checked_cast<const MapType&>(*batch[0].type()).item_type();
     const auto& map_scalar = batch[0].scalar_as<MapScalar>();
 
     if (ARROW_PREDICT_FALSE(!map_scalar.is_valid)) {
@@ -630,8 +632,15 @@ struct MapLookupFunctor {
     const auto& struct_array = checked_cast<const StructArray&>(*map_scalar.value);
     ArraySpan map_keys(*struct_array.data()->child_data[0]);
 
+    // Keys offset and length must be adjusted to match its parent
+    map_keys.length = struct_array.length();
+    map_keys.offset = struct_array.offset();
+
     if (options.occurrence == MapLookupOptions::Occurrence::ALL) {
       ArraySpan map_items(*struct_array.data()->child_data[1]);
+      // Keys offset and length must be adjusted to match its parent
+      map_items.length = struct_array.length();
+      map_items.offset = struct_array.offset();
 
       bool found_at_least_one_key = false;
       std::unique_ptr<ArrayBuilder> builder;
@@ -649,7 +658,7 @@ struct MapLookupFunctor {
         ARROW_ASSIGN_OR_RAISE(out->value, MakeScalar(list(item_type), result));
       }
     } else { /* occurrence == FIRST || LAST */
-      const std::shared_ptr<Array>& items = struct_array.field(1);
+      std::shared_ptr<Array> items = struct_array.field(1);
       ARROW_ASSIGN_OR_RAISE(
           int64_t item_index,
           GetOneMatchingIndex(map_keys, query_key,

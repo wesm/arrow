@@ -72,10 +72,17 @@ Status ExecRandom(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     std::lock_guard<std::mutex> seed_gen_lock(seed_gen_mutex);
     gen.seed(seed_gen());
   }
-  double* out_data = out->array_span()->GetValues<double>(1);
+  // TODO(wesm): refactor to use batch length instead of passing length in
+  // options
+  auto out_data = ArrayData::Make(float64(), options.length, 0);
+  out_data->buffers.resize(2, nullptr);
+  ARROW_ASSIGN_OR_RAISE(out_data->buffers[1],
+                        ctx->Allocate(options.length * sizeof(double)));
+  double* out_values = out_data->GetMutableValues<double>(1);
   for (int64_t i = 0; i < options.length; ++i) {
-    out_data[i] = generate_uniform(&gen);
+    out_values[i] = generate_uniform(&gen);
   }
+  out->value = std::move(out_data);
   return Status::OK();
 }
 
@@ -96,6 +103,7 @@ void RegisterScalarRandom(FunctionRegistry* registry) {
   ScalarKernel kernel{
       {}, ValueDescr(float64(), ValueDescr::Shape::ARRAY), ExecRandom, RandomState::Init};
   kernel.null_handling = NullHandling::OUTPUT_NOT_NULL;
+  kernel.mem_allocation = MemAllocation::NO_PREALLOCATE;
   DCHECK_OK(random_func->AddKernel(kernel));
   DCHECK_OK(registry->AddFunction(std::move(random_func)));
 }

@@ -956,6 +956,8 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
           elide_validity_bitmap_ = elide_validity_bitmap_ && null_gen;
         }
         validity_preallocated_ = !elide_validity_bitmap_;
+      } else if (kernel_->null_handling == NullHandling::OUTPUT_NOT_NULL) {
+        elide_validity_bitmap_ = true;
       }
     }
     if (kernel_->mem_allocation == MemAllocation::PREALLOCATE) {

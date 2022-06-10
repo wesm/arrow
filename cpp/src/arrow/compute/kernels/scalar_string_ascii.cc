@@ -2540,9 +2540,11 @@ void AddAsciiStringReplaceSlice(FunctionRegistry* registry) {
   }
   using TransformExec =
       FixedSizeBinaryTransformExecWithState<BinaryReplaceSliceTransform>;
-  DCHECK_OK(func->AddKernel({InputType(Type::FIXED_SIZE_BINARY)},
-                            OutputType(TransformExec::OutputType), TransformExec::Exec,
-                            ReplaceStringSliceTransformBase::State::Init));
+  ScalarKernel fsb_kernel({InputType(Type::FIXED_SIZE_BINARY)},
+                          OutputType(TransformExec::OutputType), TransformExec::Exec,
+                          ReplaceStringSliceTransformBase::State::Init);
+  fsb_kernel.mem_allocation = MemAllocation::NO_PREALLOCATE;
+  DCHECK_OK(func->AddKernel(std::move(fsb_kernel)));
   DCHECK_OK(registry->AddFunction(std::move(func)));
 }
 

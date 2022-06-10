@@ -90,11 +90,33 @@ ScalarKernel::ExecFunc TrivialScalarUnaryAsArraysExec(ScalarKernel::ExecFunc exe
       ARROW_ASSIGN_OR_RAISE(out->value,
                             MakeArray(array_result.array_data())->GetScalar(0));
     } else {
+      DCHECK(is_fixed_width(out->type()->id()));
+      ArrayData* out_data = array_out->data().get();
+
+      // the null count will be unknown after the kernel executes
+      out_data->null_count = kUnknownNullCount;
+
       ArraySpan* span = array_result.array_span();
-      span->SetMembers(*array_out->data());
+
+      // TODO(wesm): It isn't safe to write into the memory allocated by
+      // MakeArrayFromScalar because MakeArrayOfNull reuses memory across
+      // buffers. So to be able to write into an ArraySpan we need to allocate
+      // some memory with the same structure as array_out
+      //
+      // Should probably implement a "make empty" array whose buffers are all
+      // safe to modify
+      if (out_data->buffers[0]) {
+        ARROW_ASSIGN_OR_RAISE(out_data->buffers[0],
+                              out_data->buffers[0]->CopySlice(0, 1));
+      }
+      ARROW_ASSIGN_OR_RAISE(out_data->buffers[1], out_data->buffers[1]->CopySlice(
+                                                      0, out_data->buffers[1]->size()));
+      span->SetMembers(*out_data);
       RETURN_NOT_OK(exec(ctx, span_with_arrays, &array_result));
-      std::shared_ptr<Array> boxed_result = array_result.array_span()->ToArray();
-      ARROW_ASSIGN_OR_RAISE(out->value, boxed_result->GetScalar(0));
+
+      // XXX(wesm): have to rebox the array after mutating the buffers because
+      // of the cached validity bitmap buffer
+      ARROW_ASSIGN_OR_RAISE(out->value, MakeArray(array_out->data())->GetScalar(0));
     }
     return Status::OK();
   };

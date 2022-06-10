@@ -126,6 +126,50 @@ struct ListElementArray {
   }
 };
 
+template <typename Type, typename IndexType>
+struct FixedSizeListElementArray {
+  using IndexScalarType = typename TypeTraits<IndexType>::ScalarType;
+
+  static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
+    const auto& index_scalar = batch[1].scalar_as<IndexScalarType>();
+    if (ARROW_PREDICT_FALSE(!index_scalar.is_valid)) {
+      return Status::Invalid("Index must not be null");
+    }
+
+    auto item_size = checked_cast<const FixedSizeListType&>(*batch[0].type()).list_size();
+
+    const ArraySpan& list = batch[0].array;
+    const ArraySpan& list_values = list.child_data[0];
+
+    auto index = index_scalar.value;
+    if (ARROW_PREDICT_FALSE(index < 0)) {
+      return Status::Invalid("Index ", index,
+                             " is out of bounds: should be greater than or equal to 0");
+    }
+    std::unique_ptr<ArrayBuilder> builder;
+
+    const Type* list_type = checked_cast<const Type*>(list.type);
+    RETURN_NOT_OK(MakeBuilder(ctx->memory_pool(), list_type->value_type(), &builder));
+    RETURN_NOT_OK(builder->Reserve(list.length));
+    for (int i = 0; i < list.length; ++i) {
+      if (list.IsNull(i)) {
+        RETURN_NOT_OK(builder->AppendNull());
+        continue;
+      }
+      if (ARROW_PREDICT_FALSE(index >=
+                              static_cast<typename IndexType::c_type>(item_size))) {
+        return Status::Invalid("Index ", index, " is out of bounds: should be in [0, ",
+                               item_size, ")");
+      }
+      RETURN_NOT_OK(builder->AppendArraySlice(list_values,
+                                              (list.offset + i) * item_size + index, 1));
+    }
+    ARROW_ASSIGN_OR_RAISE(auto result, builder->Finish());
+    out->value = result->data();
+    return Status::OK();
+  }
+};
+
 template <typename, typename IndexType>
 struct ListElementScalar {
   static Status Exec(KernelContext* /*ctx*/, const ExecSpan& batch, ExecResult* out) {
@@ -153,14 +197,14 @@ struct ListElementScalar {
   }
 };
 
-template <typename InListType>
+template <typename InListType, template <typename...> class Functor>
 void AddListElementArrayKernels(ScalarFunction* func) {
   for (const auto& index_type : IntTypes()) {
     auto inputs = {InputType::Array(InListType::type_id), InputType::Scalar(index_type)};
     auto output = OutputType{ListValuesType};
     auto sig = KernelSignature::Make(std::move(inputs), std::move(output),
                                      /*is_varargs=*/false);
-    auto scalar_exec = GenerateInteger<ListElementArray, InListType>({index_type->id()});
+    auto scalar_exec = GenerateInteger<Functor, InListType>({index_type->id()});
     ScalarKernel kernel{std::move(sig), std::move(scalar_exec)};
     kernel.null_handling = NullHandling::COMPUTED_NO_PREALLOCATE;
     kernel.mem_allocation = MemAllocation::NO_PREALLOCATE;
@@ -169,9 +213,9 @@ void AddListElementArrayKernels(ScalarFunction* func) {
 }
 
 void AddListElementArrayKernels(ScalarFunction* func) {
-  AddListElementArrayKernels<ListType>(func);
-  AddListElementArrayKernels<LargeListType>(func);
-  AddListElementArrayKernels<FixedSizeListType>(func);
+  AddListElementArrayKernels<ListType, ListElementArray>(func);
+  AddListElementArrayKernels<LargeListType, ListElementArray>(func);
+  AddListElementArrayKernels<FixedSizeListType, FixedSizeListElementArray>(func);
 }
 
 void AddListElementScalarKernels(ScalarFunction* func) {

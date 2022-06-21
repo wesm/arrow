@@ -1348,25 +1348,23 @@ struct Strptime {
   }
 };
 
-Result<ValueDescr> ResolveStrptimeOutput(KernelContext* ctx,
-                                         const std::vector<ValueDescr>&) {
+Result<TypeHolder> ResolveStrptimeOutput(KernelContext* ctx,
+                                         const std::vector<TypeHolder>&) {
   if (!ctx->state()) {
     return Status::Invalid("strptime does not provide default StrptimeOptions");
   }
   const StrptimeOptions& options = StrptimeState::Get(ctx);
-  auto type = timestamp(options.unit, GetZone(options.format));
-  return ValueDescr(std::move(type));
+  return timestamp(options.unit, GetZone(options.format);
 }
 
 // ----------------------------------------------------------------------
 // Convert timestamps from local timestamp without a timezone to timestamps with a
 // timezone, interpreting the local timestamp as being in the specified timezone
 
-Result<ValueDescr> ResolveAssumeTimezoneOutput(KernelContext* ctx,
-                                               const std::vector<ValueDescr>& args) {
+Result<TypeHolder> ResolveAssumeTimezoneOutput(KernelContext* ctx,
+                                               const std::vector<TypeHolder>& args) {
   auto in_type = checked_cast<const TimestampType*>(args[0].type.get());
-  auto type = timestamp(in_type->unit(), AssumeTimezoneState::Get(ctx).timezone);
-  return ValueDescr(std::move(type));
+  return timestamp(in_type->unit(), AssumeTimezoneState::Get(ctx).timezone);
 }
 
 template <typename Duration>

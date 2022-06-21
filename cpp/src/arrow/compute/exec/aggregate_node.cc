@@ -104,8 +104,7 @@ class ScalarAggregateNode : public ExecNode {
                                aggregates[i].function);
       }
 
-      auto in_type = ValueDescr::Array(input_schema.field(target_field_ids[i])->type());
-
+      TypeHolder in_type(input_schema.field(target_field_ids[i])->type().get());
       ARROW_ASSIGN_OR_RAISE(const Kernel* kernel, function->DispatchExact({in_type}));
       kernels[i] = static_cast<const ScalarAggregateKernel*>(kernel);
 
@@ -313,25 +312,25 @@ class GroupByNode : public ExecNode {
     }
 
     // Build vector of aggregate source field data types
-    std::vector<ValueDescr> agg_src_descrs(aggs.size());
+    DCHECK_EQ(aggregate_options.targets.size(), aggs.size());
+    std::vector<TypeHolder> agg_src_types(aggs.size());
     for (size_t i = 0; i < aggs.size(); ++i) {
       auto agg_src_field_id = agg_src_field_ids[i];
-      agg_src_descrs[i] =
-          ValueDescr(input_schema->field(agg_src_field_id)->type(), ValueDescr::ARRAY);
+      agg_src_types[i] = input_schema->field(agg_src_field_id)->type().get();
     }
 
     auto ctx = input->plan()->exec_context();
 
     // Construct aggregates
     ARROW_ASSIGN_OR_RAISE(auto agg_kernels,
-                          internal::GetKernels(ctx, aggs, agg_src_descrs));
+                          internal::GetKernels(ctx, aggs, agg_src_types));
 
     ARROW_ASSIGN_OR_RAISE(auto agg_states,
-                          internal::InitKernels(agg_kernels, ctx, aggs, agg_src_descrs));
+                          internal::InitKernels(agg_kernels, ctx, aggs, agg_src_types));
 
     ARROW_ASSIGN_OR_RAISE(
         FieldVector agg_result_fields,
-        internal::ResolveKernels(aggs, agg_kernels, agg_states, ctx, agg_src_descrs));
+        internal::ResolveKernels(aggs, agg_kernels, agg_states, ctx, agg_src_types));
 
     // Build field vector for output schema
     FieldVector output_fields{keys.size() + aggs.size()};
@@ -621,26 +620,24 @@ class GroupByNode : public ExecNode {
     if (state->grouper != nullptr) return Status::OK();
 
     // Build vector of key field data types
-    std::vector<ValueDescr> key_descrs(key_field_ids_.size());
+    std::vector<TypeHolder> key_types(key_field_ids_.size());
     for (size_t i = 0; i < key_field_ids_.size(); ++i) {
       auto key_field_id = key_field_ids_[i];
-      key_descrs[i] = ValueDescr(input_schema->field(key_field_id)->type());
+      key_types[i] = input_schema->field(key_field_id)->type().get();
     }
 
     // Construct grouper
-    ARROW_ASSIGN_OR_RAISE(state->grouper, Grouper::Make(key_descrs, ctx_));
+    ARROW_ASSIGN_OR_RAISE(state->grouper, Grouper::Make(key_types, ctx_));
 
     // Build vector of aggregate source field data types
-    std::vector<ValueDescr> agg_src_descrs(agg_kernels_.size());
+    std::vector<TypeHolder> agg_src_types(agg_kernels_.size());
     for (size_t i = 0; i < agg_kernels_.size(); ++i) {
       auto agg_src_field_id = agg_src_field_ids_[i];
-      agg_src_descrs[i] =
-          ValueDescr(input_schema->field(agg_src_field_id)->type(), ValueDescr::ARRAY);
+      agg_src_types[i] = input_schema->field(agg_src_field_id)->type().get();
     }
 
-    ARROW_ASSIGN_OR_RAISE(
-        state->agg_states,
-        internal::InitKernels(agg_kernels_, ctx_, aggs_, agg_src_descrs));
+    ARROW_ASSIGN_OR_RAISE(state->agg_states, internal::InitKernels(agg_kernels_, ctx_,
+                                                                   aggs_, agg_src_types));
 
     return Status::OK();
   }

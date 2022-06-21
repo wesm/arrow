@@ -73,29 +73,14 @@ struct PythonUdf {
     OwnedRef result(cb(function->obj(), udf_context, arg_tuple.obj()));
     RETURN_NOT_OK(CheckPyError());
     // unwrapping the output for expected output type
-    if (is_scalar(result.obj())) {
-      if (out->is_array_data()) {
-        return Status::TypeError(
-            "UDF executor expected an array result but a "
-            "scalar was returned");
-      }
-      ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Scalar> val, unwrap_scalar(result.obj()));
-      RETURN_NOT_OK(CheckOutputType(*output_type.type(), *val->type));
-      out->value = val;
-      return Status::OK();
-    } else if (is_array(result.obj())) {
-      if (out->is_scalar()) {
-        return Status::TypeError(
-            "UDF executor expected a scalar result but an "
-            "array was returned");
-      }
+    if (is_array(result.obj())) {
       ARROW_ASSIGN_OR_RAISE(std::shared_ptr<Array> val, unwrap_array(result.obj()));
       RETURN_NOT_OK(CheckOutputType(*output_type.type(), *val->type()));
       out->value = std::move(val->data());
       return Status::OK();
     } else {
       return Status::TypeError("Unexpected output type: ", Py_TYPE(result.obj())->tp_name,
-                               " (expected Scalar or Array)");
+                               " (expected Array)");
     }
     return Status::OK();
   }

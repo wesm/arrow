@@ -505,7 +505,7 @@ class IndexInMetaBinary : public MetaFunction {
 struct SetLookupFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* values) const override {
     EnsureDictionaryDecoded(values);
     return DispatchExact(*values);
   }

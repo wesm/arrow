@@ -41,18 +41,15 @@ namespace internal {
 Status CastIntegerToInteger(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
   const auto& options = checked_cast<const CastState*>(ctx->state())->options;
   if (!options.allow_int_overflow) {
-    if (batch[0].is_array()) {
-      RETURN_NOT_OK(IntegersCanFit(batch[0].array, *out->type()));
-    } else {
-      RETURN_NOT_OK(IntegersCanFit(*batch[0].scalar, *out->type()));
-    }
+    RETURN_NOT_OK(IntegersCanFit(batch[0].array, *out->type()));
   }
   CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
   return Status::OK();
 }
 
 Status CastFloatingToFloating(KernelContext*, const ExecSpan& batch, ExecResult* out) {
-  CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0], out);
+  CastNumberToNumberUnsafe(batch[0].type()->id(), out->type()->id(), batch[0].array,
+                           out->array_span());
   return Status::OK();
 }
 
@@ -63,7 +60,7 @@ Status CastFloatingToFloating(KernelContext*, const ExecSpan& batch, ExecResult*
 template <typename InType, typename OutType, typename InT = typename InType::c_type,
           typename OutT = typename OutType::c_type>
 ARROW_DISABLE_UBSAN("float-cast-overflow")
-Status CheckFloatTruncation(const ExecValue& input, const ExecResult& output) {
+Status CheckFloatTruncation(const ArraySpan& input, const ArraySpan& output) {
   auto WasTruncated = [&](OutT out_val, InT in_val) -> bool {
     return static_cast<InT>(out_val) != in_val;
   };
@@ -74,17 +71,6 @@ Status CheckFloatTruncation(const ExecValue& input, const ExecResult& output) {
     return Status::Invalid("Float value ", val, " was truncated converting to ",
                            *output.type());
   };
-
-  if (input.is_scalar()) {
-    DCHECK(output.is_scalar());
-    const auto& in_scalar = input.scalar_as<typename TypeTraits<InType>::ScalarType>();
-    const auto& out_scalar =
-        checked_cast<typename TypeTraits<OutType>::ScalarType&>(*output.scalar());
-    if (WasTruncatedMaybeNull(out_scalar.value, in_scalar.value, out_scalar.is_valid)) {
-      return GetErrorMessage(in_scalar.value);
-    }
-    return Status::OK();
-  }
 
   const ArraySpan& in_array = input.array;
   const ArraySpan& out_array = *output.array_span();
@@ -136,8 +122,8 @@ Status CheckFloatTruncation(const ExecValue& input, const ExecResult& output) {
 }
 
 template <typename InType>
-Status CheckFloatToIntTruncationImpl(const ExecValue& input, const ExecResult& output) {
-  switch (output.type()->id()) {
+Status CheckFloatToIntTruncationImpl(const ArraySpan& input, const ArraySpan& output) {
+  switch (output.type->id()) {
     case Type::INT8:
       return CheckFloatTruncation<InType, Int8Type>(input, output);
     case Type::INT16:

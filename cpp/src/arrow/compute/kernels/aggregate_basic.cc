@@ -195,7 +195,7 @@ Result<std::unique_ptr<KernelState>> CountDistinctInit(KernelContext* ctx,
 
 template <typename Type, typename VisitorArgType = typename Type::c_type>
 void AddCountDistinctKernel(InputType type, ScalarAggregateFunction* func) {
-  AddAggKernel(KernelSignature::Make({type}, ValueDescr::Scalar(int64())),
+  AddAggKernel(KernelSignature::Make({type}, int64()),
                CountDistinctInit<Type, VisitorArgType>, func);
 }
 
@@ -425,14 +425,8 @@ Result<std::unique_ptr<KernelState>> MinMaxInit(KernelContext* ctx,
 template <MinOrMax min_or_max>
 void AddMinOrMaxAggKernel(ScalarAggregateFunction* func,
                           ScalarAggregateFunction* min_max_func) {
-  auto sig = KernelSignature::Make(
-      {InputType(ValueDescr::ANY)},
-      OutputType([](KernelContext*,
-                    const std::vector<ValueDescr>& descrs) -> Result<ValueDescr> {
-        // any[T] -> scalar[T]
-        return ValueDescr::Scalar(descrs.front().type);
-      }));
-
+  // Scalar output shape is implicit for SCALAR_AGGREGATE
+  auto sig = KernelSignature::Make({InputType::Any()}, FirstType);
   auto init = [min_max_func](
                   KernelContext* ctx,
                   const KernelInitArgs& args) -> Result<std::unique_ptr<KernelState>> {
@@ -776,7 +770,7 @@ void AddBasicAggKernels(KernelInit init,
   for (const auto& ty : types) {
     // array[InT] -> scalar[OutT]
     auto sig =
-        KernelSignature::Make({InputType::Array(ty->id())}, ValueDescr::Scalar(out_ty));
+        KernelSignature::Make({ty->id())}, out_ty);
     AddAggKernel(std::move(sig), init, func, simd_level);
   }
 }
@@ -786,9 +780,7 @@ void AddScalarAggKernels(KernelInit init,
                          std::shared_ptr<DataType> out_ty,
                          ScalarAggregateFunction* func) {
   for (const auto& ty : types) {
-    // scalar[InT] -> scalar[OutT]
-    auto sig =
-        KernelSignature::Make({InputType::Scalar(ty->id())}, ValueDescr::Scalar(out_ty));
+    auto sig = KernelSignature::Make({ty->id()}, out_ty);
     AddAggKernel(std::move(sig), init, func, SimdLevel::NONE);
   }
 }
@@ -804,17 +796,17 @@ void AddArrayScalarAggKernels(KernelInit init,
 
 namespace {
 
-Result<ValueDescr> MinMaxType(KernelContext*, const std::vector<ValueDescr>& descrs) {
-  // any[T] -> scalar[struct<min: T, max: T>]
-  auto ty = descrs.front().type;
-  return ValueDescr::Scalar(struct_({field("min", ty), field("max", ty)}));
+Result<TypeHolder> MinMaxType(KernelContext*, const std::vector<TypeHolder>& types) {
+  // T -> struct<min: T, max: T>
+  auto ty = types.front().type;
+  return struct_({field("min", ty), field("max", ty)});
 }
 
 }  // namespace
 
 void AddMinMaxKernel(KernelInit init, internal::detail::GetTypeId get_id,
                      ScalarAggregateFunction* func, SimdLevel::type simd_level) {
-  auto sig = KernelSignature::Make({InputType(get_id.id)}, OutputType(MinMaxType));
+  auto sig = KernelSignature::Make({InputType(get_id.id)}, MinMaxType);
   AddAggKernel(std::move(sig), init, func, simd_level);
 }
 
@@ -827,13 +819,6 @@ void AddMinMaxKernels(KernelInit init,
 }
 
 namespace {
-
-Result<ValueDescr> ScalarFirstType(KernelContext*,
-                                   const std::vector<ValueDescr>& descrs) {
-  ValueDescr result = descrs.front();
-  result.shape = ValueDescr::SCALAR;
-  return result;
-}
 
 const FunctionDoc count_doc{"Count the number of null / non-null values",
                             ("By default, only non-null values are counted.\n"
@@ -922,8 +907,7 @@ void RegisterScalarAggregateBasic(FunctionRegistry* registry) {
 
   // Takes any input, outputs int64 scalar
   InputType any_input;
-  AddAggKernel(KernelSignature::Make({any_input}, ValueDescr::Scalar(int64())), CountInit,
-               func.get());
+  AddAggKernel(KernelSignature::Make({any_input}, int64()), CountInit, func.get());
   DCHECK_OK(registry->AddFunction(std::move(func)));
 
   func = std::make_shared<ScalarAggregateFunction>(
@@ -935,12 +919,10 @@ void RegisterScalarAggregateBasic(FunctionRegistry* registry) {
   func = std::make_shared<ScalarAggregateFunction>("sum", Arity::Unary(), sum_doc,
                                                    &default_scalar_aggregate_options);
   AddArrayScalarAggKernels(SumInit, {boolean()}, uint64(), func.get());
-  AddAggKernel(
-      KernelSignature::Make({InputType(Type::DECIMAL128)}, OutputType(ScalarFirstType)),
-      SumInit, func.get(), SimdLevel::NONE);
-  AddAggKernel(
-      KernelSignature::Make({InputType(Type::DECIMAL256)}, OutputType(ScalarFirstType)),
-      SumInit, func.get(), SimdLevel::NONE);
+  AddAggKernel(KernelSignature::Make({Type::DECIMAL128}, FirstType), SumInit, func.get(),
+               SimdLevel::NONE);
+  AddAggKernel(KernelSignature::Make({Type::DECIMAL256}, FirstType), SumInit, func.get(),
+               SimdLevel::NONE);
   AddArrayScalarAggKernels(SumInit, SignedIntTypes(), int64(), func.get());
   AddArrayScalarAggKernels(SumInit, UnsignedIntTypes(), uint64(), func.get());
   AddArrayScalarAggKernels(SumInit, FloatingPointTypes(), float64(), func.get());
@@ -965,12 +947,10 @@ void RegisterScalarAggregateBasic(FunctionRegistry* registry) {
                                                    &default_scalar_aggregate_options);
   AddArrayScalarAggKernels(MeanInit, {boolean()}, float64(), func.get());
   AddArrayScalarAggKernels(MeanInit, NumericTypes(), float64(), func.get());
-  AddAggKernel(
-      KernelSignature::Make({InputType(Type::DECIMAL128)}, OutputType(ScalarFirstType)),
-      MeanInit, func.get(), SimdLevel::NONE);
-  AddAggKernel(
-      KernelSignature::Make({InputType(Type::DECIMAL256)}, OutputType(ScalarFirstType)),
-      MeanInit, func.get(), SimdLevel::NONE);
+  AddAggKernel(KernelSignature::Make({Type::DECIMAL128}, FirstType), MeanInit, func.get(),
+               SimdLevel::NONE);
+  AddAggKernel(KernelSignature::Make({Type::DECIMAL256}, FirstType), MeanInit, func.get(),
+               SimdLevel::NONE);
   AddArrayScalarAggKernels(MeanInit, {null()}, float64(), func.get());
   // Add the SIMD variants for mean
 #if defined(ARROW_HAVE_RUNTIME_AVX2)
@@ -1028,12 +1008,10 @@ void RegisterScalarAggregateBasic(FunctionRegistry* registry) {
   AddArrayScalarAggKernels(ProductInit::Init, UnsignedIntTypes(), uint64(), func.get());
   AddArrayScalarAggKernels(ProductInit::Init, FloatingPointTypes(), float64(),
                            func.get());
-  AddAggKernel(
-      KernelSignature::Make({InputType(Type::DECIMAL128)}, OutputType(ScalarFirstType)),
-      ProductInit::Init, func.get(), SimdLevel::NONE);
-  AddAggKernel(
-      KernelSignature::Make({InputType(Type::DECIMAL256)}, OutputType(ScalarFirstType)),
-      ProductInit::Init, func.get(), SimdLevel::NONE);
+  AddAggKernel(KernelSignature::Make({Type::DECIMAL128}, FirstType), ProductInit::Init,
+               func.get(), SimdLevel::NONE);
+  AddAggKernel(KernelSignature::Make({Type::DECIMAL256}, FirstType), ProductInit::Init,
+               func.get(), SimdLevel::NONE);
   AddArrayScalarAggKernels(ProductInit::Init, {null()}, int64(), func.get());
   DCHECK_OK(registry->AddFunction(std::move(func)));
 

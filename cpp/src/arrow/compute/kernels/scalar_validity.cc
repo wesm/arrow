@@ -331,15 +331,15 @@ const FunctionDoc is_nan_doc("Return true if NaN",
 
 void RegisterScalarValidity(FunctionRegistry* registry) {
   static auto kNullOptions = NullOptions::Defaults();
-  MakeFunction("is_valid", is_valid_doc, {ValueDescr::ANY}, boolean(), IsValidExec,
+  MakeFunction("is_valid", is_valid_doc, {InputType::Any()}, boolean(), IsValidExec,
                registry, NullHandling::OUTPUT_NOT_NULL,
                /*can_write_into_slices=*/false);
 
-  MakeFunction("is_null", is_null_doc, {ValueDescr::ANY}, boolean(), IsNullExec, registry,
-               NullHandling::OUTPUT_NOT_NULL,
+  MakeFunction("is_null", is_null_doc, {InputType::Any()}, boolean(), IsNullExec,
+               registry, NullHandling::OUTPUT_NOT_NULL,
                /*can_write_into_slices=*/true, &kNullOptions, NanOptionsState::Init);
 
-  MakeFunction("true_unless_null", true_unless_null_doc, {ValueDescr::ANY}, boolean(),
+  MakeFunction("true_unless_null", true_unless_null_doc, {InputType::Any()}, boolean(),
                TrueUnlessNullExec, registry, NullHandling::INTERSECTION,
                /*can_write_into_slices=*/false);
 

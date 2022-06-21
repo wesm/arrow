@@ -1065,24 +1065,24 @@ ArrayKernelExec GenerateArithmeticFloatingPoint(detail::GetTypeId get_id) {
 
 // resolve decimal binary operation output type per *casted* args
 template <typename OutputGetter>
-Result<ValueDescr> ResolveDecimalBinaryOperationOutput(
-    const std::vector<ValueDescr>& args, OutputGetter&& getter) {
-  // casted args should be same size decimals
-  auto left_type = checked_cast<const DecimalType*>(args[0].type.get());
-  auto right_type = checked_cast<const DecimalType*>(args[1].type.get());
+Result<TypeHolder> ResolveDecimalBinaryOperationOutput(
+    const std::vector<TypeHolder>& types, OutputGetter&& getter) {
+  // casted types should be same size decimals
+  auto left_type = checked_cast<const DecimalType*>(types[0].type.get());
+  auto right_type = checked_cast<const DecimalType*>(types[1].type.get());
   DCHECK_EQ(left_type->id(), right_type->id());
 
   int32_t precision, scale;
   std::tie(precision, scale) = getter(left_type->precision(), left_type->scale(),
                                       right_type->precision(), right_type->scale());
   ARROW_ASSIGN_OR_RAISE(auto type, DecimalType::Make(left_type->id(), precision, scale));
-  return ValueDescr(std::move(type), GetBroadcastShape(args));
+  return std::move(type);
 }
 
-Result<ValueDescr> ResolveDecimalAdditionOrSubtractionOutput(
-    KernelContext*, const std::vector<ValueDescr>& args) {
+Result<TypeHolder> ResolveDecimalAdditionOrSubtractionOutput(
+    KernelContext*, const std::vector<TypeHolder>& types) {
   return ResolveDecimalBinaryOperationOutput(
-      args, [](int32_t p1, int32_t s1, int32_t p2, int32_t s2) {
+      types, [](int32_t p1, int32_t s1, int32_t p2, int32_t s2) {
         DCHECK_EQ(s1, s2);
         const int32_t scale = s1;
         const int32_t precision = std::max(p1 - s1, p2 - s2) + scale + 1;
@@ -1090,20 +1090,20 @@ Result<ValueDescr> ResolveDecimalAdditionOrSubtractionOutput(
       });
 }
 
-Result<ValueDescr> ResolveDecimalMultiplicationOutput(
-    KernelContext*, const std::vector<ValueDescr>& args) {
+Result<TypeHolder> ResolveDecimalMultiplicationOutput(
+    KernelContext*, const std::vector<TypeHolder>& types) {
   return ResolveDecimalBinaryOperationOutput(
-      args, [](int32_t p1, int32_t s1, int32_t p2, int32_t s2) {
+      types, [](int32_t p1, int32_t s1, int32_t p2, int32_t s2) {
         const int32_t scale = s1 + s2;
         const int32_t precision = p1 + p2 + 1;
         return std::make_pair(precision, scale);
       });
 }
 
-Result<ValueDescr> ResolveDecimalDivisionOutput(KernelContext*,
-                                                const std::vector<ValueDescr>& args) {
+Result<TypeHolder> ResolveDecimalDivisionOutput(KernelContext*,
+                                                const std::vector<TypeHolder>& types) {
   return ResolveDecimalBinaryOperationOutput(
-      args, [](int32_t p1, int32_t s1, int32_t p2, int32_t s2) {
+      types, [](int32_t p1, int32_t s1, int32_t p2, int32_t s2) {
         DCHECK_GE(s1, s2);
         const int32_t scale = s1 - s2;
         const int32_t precision = p1;
@@ -1111,11 +1111,11 @@ Result<ValueDescr> ResolveDecimalDivisionOutput(KernelContext*,
       });
 }
 
-Result<ValueDescr> ResolveTemporalOutput(KernelContext*,
-                                         const std::vector<ValueDescr>& args) {
-  DCHECK_EQ(args[0].type->id(), args[1].type->id());
-  auto left_type = checked_cast<const TimestampType*>(args[0].type.get());
-  auto right_type = checked_cast<const TimestampType*>(args[1].type.get());
+Result<TypeHolder> ResolveTemporalOutput(KernelContext*,
+                                         const std::vector<TypeHolder>& types) {
+  DCHECK_EQ(types[0].type->id(), types[1].type->id());
+  auto left_type = checked_cast<const TimestampType*>(types[0].type.get());
+  auto right_type = checked_cast<const TimestampType*>(types[1].type.get());
   DCHECK_EQ(left_type->unit(), left_type->unit());
 
   if ((left_type->timezone() == "" || right_type->timezone() == "") &&
@@ -1125,7 +1125,7 @@ Result<ValueDescr> ResolveTemporalOutput(KernelContext*,
   }
 
   auto type = duration(right_type->unit());
-  return ValueDescr(std::move(type), GetBroadcastShape(args));
+  return std::move(type);
 }
 
 template <typename Op>
@@ -1195,44 +1195,44 @@ ArrayKernelExec GenerateArithmeticWithFixedIntOutType(detail::GetTypeId get_id) 
 struct ArithmeticFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
 
-    RETURN_NOT_OK(CheckDecimals(values));
+    RETURN_NOT_OK(CheckDecimals(types));
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
+    EnsureDictionaryDecoded(types);
 
     // Only promote types for binary functions
-    if (values->size() == 2) {
-      ReplaceNullWithOtherType(values);
+    if (types->size() == 2) {
+      ReplaceNullWithOtherType(types);
       TimeUnit::type finest_unit;
-      if (CommonTemporalResolution(values->data(), values->size(), &finest_unit)) {
-        ReplaceTemporalTypes(finest_unit, values);
-      } else if (auto numeric_type = CommonNumeric(*values)) {
-        ReplaceTypes(numeric_type, values);
+      if (CommonTemporalResolution(types->data(), types->size(), &finest_unit)) {
+        ReplaceTemporalTypes(finest_unit, types);
+      } else if (auto numeric_type = CommonNumeric(*types)) {
+        ReplaceTypes(numeric_type, types);
       }
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 
-  Status CheckDecimals(std::vector<ValueDescr>* values) const {
-    if (!HasDecimal(*values)) return Status::OK();
+  Status CheckDecimals(std::vector<TypeHolder>* types) const {
+    if (!HasDecimal(*types)) return Status::OK();
 
-    if (values->size() == 2) {
+    if (types->size() == 2) {
       // "add_checked" -> "add"
       const auto func_name = name();
       const std::string op = func_name.substr(0, func_name.find("_"));
       if (op == "add" || op == "subtract") {
-        return CastBinaryDecimalArgs(DecimalPromotion::kAdd, values);
+        return CastBinaryDecimalArgs(DecimalPromotion::kAdd, types);
       } else if (op == "multiply") {
-        return CastBinaryDecimalArgs(DecimalPromotion::kMultiply, values);
+        return CastBinaryDecimalArgs(DecimalPromotion::kMultiply, types);
       } else if (op == "divide") {
-        return CastBinaryDecimalArgs(DecimalPromotion::kDivide, values);
+        return CastBinaryDecimalArgs(DecimalPromotion::kDivide, types);
       } else {
         return Status::Invalid("Invalid decimal function: ", func_name);
       }
@@ -1245,29 +1245,29 @@ struct ArithmeticFunction : ScalarFunction {
 struct ArithmeticDecimalToFloatingPointFunction : public ArithmeticFunction {
   using ArithmeticFunction::ArithmeticFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
+    EnsureDictionaryDecoded(types);
 
-    if (values->size() == 2) {
-      ReplaceNullWithOtherType(values);
+    if (types->size() == 2) {
+      ReplaceNullWithOtherType(types);
     }
 
-    for (auto& descr : *values) {
+    for (auto& descr : *types) {
       if (is_decimal(descr.type->id())) {
         descr.type = float64();
       }
     }
-    if (auto type = CommonNumeric(*values)) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonNumeric(*types)) {
+      ReplaceTypes(type, types);
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 
@@ -1275,30 +1275,30 @@ struct ArithmeticDecimalToFloatingPointFunction : public ArithmeticFunction {
 struct ArithmeticIntegerToFloatingPointFunction : public ArithmeticFunction {
   using ArithmeticFunction::ArithmeticFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
-    RETURN_NOT_OK(CheckDecimals(values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
+    RETURN_NOT_OK(CheckDecimals(types));
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
+    EnsureDictionaryDecoded(types);
 
-    if (values->size() == 2) {
-      ReplaceNullWithOtherType(values);
+    if (types->size() == 2) {
+      ReplaceNullWithOtherType(types);
     }
 
-    for (auto& descr : *values) {
+    for (auto& descr : *types) {
       if (is_integer(descr.type->id())) {
         descr.type = float64();
       }
     }
-    if (auto type = CommonNumeric(*values)) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonNumeric(*types)) {
+      ReplaceTypes(type, types);
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 
@@ -1306,29 +1306,29 @@ struct ArithmeticIntegerToFloatingPointFunction : public ArithmeticFunction {
 struct ArithmeticFloatingPointFunction : public ArithmeticFunction {
   using ArithmeticFunction::ArithmeticFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
+    EnsureDictionaryDecoded(types);
 
-    if (values->size() == 2) {
-      ReplaceNullWithOtherType(values);
+    if (types->size() == 2) {
+      ReplaceNullWithOtherType(types);
     }
 
-    for (auto& descr : *values) {
+    for (auto& descr : *types) {
       if (is_integer(descr.type->id()) || is_decimal(descr.type->id())) {
         descr.type = float64();
       }
     }
-    if (auto type = CommonNumeric(*values)) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonNumeric(*types)) {
+      ReplaceTypes(type, types);
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 

@@ -75,30 +75,30 @@ TEST(InputType, AnyTypeConstructor) {
   // Check the ANY_TYPE ctors
   InputType ty;
   ASSERT_EQ(InputType::ANY_TYPE, ty.kind());
-  ASSERT_EQ(ValueDescr::ANY, ty.shape());
+  ASSERT_EQ(ArgShape::ANY, ty.shape());
 
-  ty = InputType(ValueDescr::SCALAR);
-  ASSERT_EQ(ValueDescr::SCALAR, ty.shape());
+  ty = InputType(ArgShape::SCALAR);
+  ASSERT_EQ(ArgShape::SCALAR, ty.shape());
 
-  ty = InputType(ValueDescr::ARRAY);
-  ASSERT_EQ(ValueDescr::ARRAY, ty.shape());
+  ty = InputType(ArgShape::ARRAY);
+  ASSERT_EQ(ArgShape::ARRAY, ty.shape());
 }
 
 TEST(InputType, Constructors) {
   // Exact type constructor
   InputType ty1(int8());
   ASSERT_EQ(InputType::EXACT_TYPE, ty1.kind());
-  ASSERT_EQ(ValueDescr::ANY, ty1.shape());
+  ASSERT_EQ(ArgShape::ANY, ty1.shape());
   AssertTypeEqual(*int8(), *ty1.type());
 
   InputType ty1_implicit = int8();
   ASSERT_TRUE(ty1.Equals(ty1_implicit));
 
-  InputType ty1_array(int8(), ValueDescr::ARRAY);
-  ASSERT_EQ(ValueDescr::ARRAY, ty1_array.shape());
+  InputType ty1_array(int8(), ArgShape::ARRAY);
+  ASSERT_EQ(ArgShape::ARRAY, ty1_array.shape());
 
-  InputType ty1_scalar(int8(), ValueDescr::SCALAR);
-  ASSERT_EQ(ValueDescr::SCALAR, ty1_scalar.shape());
+  InputType ty1_scalar(int8(), ArgShape::SCALAR);
+  ASSERT_EQ(ArgShape::SCALAR, ty1_scalar.shape());
 
   // Same type id constructor
   InputType ty2(Type::DECIMAL);
@@ -107,11 +107,11 @@ TEST(InputType, Constructors) {
   ASSERT_TRUE(ty2.type_matcher().Matches(*decimal(12, 2)));
   ASSERT_FALSE(ty2.type_matcher().Matches(*int16()));
 
-  InputType ty2_array(Type::DECIMAL, ValueDescr::ARRAY);
-  ASSERT_EQ(ValueDescr::ARRAY, ty2_array.shape());
+  InputType ty2_array(Type::DECIMAL, ArgShape::ARRAY);
+  ASSERT_EQ(ArgShape::ARRAY, ty2_array.shape());
 
-  InputType ty2_scalar(Type::DECIMAL, ValueDescr::SCALAR);
-  ASSERT_EQ(ValueDescr::SCALAR, ty2_scalar.shape());
+  InputType ty2_scalar(Type::DECIMAL, ArgShape::SCALAR);
+  ASSERT_EQ(ArgShape::SCALAR, ty2_scalar.shape());
 
   // Implicit construction in a vector
   std::vector<InputType> types = {int8(), InputType(Type::DECIMAL)};
@@ -143,9 +143,9 @@ TEST(InputType, Constructors) {
   ASSERT_EQ("any[timestamp(us)]", ty7.ToString());
 
   InputType ty8;
-  InputType ty9(ValueDescr::ANY);
-  InputType ty10(ValueDescr::ARRAY);
-  InputType ty11(ValueDescr::SCALAR);
+  InputType ty9(ArgShape::ANY);
+  InputType ty10(ArgShape::ARRAY);
+  InputType ty11(ArgShape::SCALAR);
   ASSERT_EQ("any[any]", ty8.ToString());
   ASSERT_EQ("any[any]", ty9.ToString());
   ASSERT_EQ("array[any]", ty10.ToString());
@@ -155,18 +155,18 @@ TEST(InputType, Constructors) {
 TEST(InputType, Equals) {
   InputType t1 = int8();
   InputType t2 = int8();
-  InputType t3(int8(), ValueDescr::ARRAY);
-  InputType t3_i32(int32(), ValueDescr::ARRAY);
-  InputType t3_scalar(int8(), ValueDescr::SCALAR);
-  InputType t4(int8(), ValueDescr::ARRAY);
-  InputType t4_i32(int32(), ValueDescr::ARRAY);
+  InputType t3(int8(), ArgShape::ARRAY);
+  InputType t3_i32(int32(), ArgShape::ARRAY);
+  InputType t3_scalar(int8(), ArgShape::SCALAR);
+  InputType t4(int8(), ArgShape::ARRAY);
+  InputType t4_i32(int32(), ArgShape::ARRAY);
 
   InputType t5(Type::DECIMAL);
   InputType t6(Type::DECIMAL);
-  InputType t7(Type::DECIMAL, ValueDescr::SCALAR);
-  InputType t7_i32(Type::INT32, ValueDescr::SCALAR);
-  InputType t8(Type::DECIMAL, ValueDescr::SCALAR);
-  InputType t8_i32(Type::INT32, ValueDescr::SCALAR);
+  InputType t7(Type::DECIMAL, ArgShape::SCALAR);
+  InputType t7_i32(Type::INT32, ArgShape::SCALAR);
+  InputType t8(Type::DECIMAL, ArgShape::SCALAR);
+  InputType t8_i32(Type::INT32, ArgShape::SCALAR);
 
   ASSERT_TRUE(t1.Equals(t2));
   ASSERT_EQ(t1, t2);
@@ -208,8 +208,8 @@ TEST(InputType, Equals) {
 
 TEST(InputType, Hash) {
   InputType t0;
-  InputType t0_scalar(ValueDescr::SCALAR);
-  InputType t0_array(ValueDescr::ARRAY);
+  InputType t0_scalar(ArgShape::SCALAR);
+  InputType t0_array(ArgShape::ARRAY);
 
   InputType t1 = int8();
   InputType t2(Type::DECIMAL);
@@ -233,21 +233,22 @@ TEST(InputType, Hash) {
 TEST(InputType, Matches) {
   InputType ty1 = int8();
 
-  ASSERT_TRUE(ty1.Matches(ValueDescr::Scalar(int8())));
-  ASSERT_TRUE(ty1.Matches(ValueDescr::Array(int8())));
-  ASSERT_TRUE(ty1.Matches(ValueDescr::Any(int8())));
-  ASSERT_FALSE(ty1.Matches(ValueDescr::Any(int16())));
+  ASSERT_TRUE(ty1.Matches(int8()));
+  ASSERT_TRUE(ty1.Matches(int8()));
+  ASSERT_FALSE(ty1.Matches(int16()));
 
   InputType ty2(Type::DECIMAL);
-  ASSERT_TRUE(ty2.Matches(ValueDescr::Scalar(decimal(12, 2))));
-  ASSERT_TRUE(ty2.Matches(ValueDescr::Array(decimal(12, 2))));
-  ASSERT_FALSE(ty2.Matches(ValueDescr::Any(float64())));
+  ASSERT_TRUE(ty2.Matches(decimal(12, 2)));
 
-  InputType ty3(int64(), ValueDescr::SCALAR);
-  ASSERT_FALSE(ty3.Matches(ValueDescr::Array(int64())));
-  ASSERT_TRUE(ty3.Matches(ValueDescr::Scalar(int64())));
-  ASSERT_FALSE(ty3.Matches(ValueDescr::Scalar(int32())));
-  ASSERT_FALSE(ty3.Matches(ValueDescr::Any(int64())));
+  auto ty2 = decimal(12, 2);
+  auto ty3 = float64();
+  ASSERT_OK_AND_ASSIGN(std::shared_ptr<Array> arr2, MakeArrayOfNull(ty2, 1));
+  ASSERT_OK_AND_ASSIGN(std::shared_ptr<Array> arr3, MakeArrayOfNull(ty3, 1));
+  ASSERT_OK_AND_ASSIGN(std::shared_ptr<Scalar> scalar2, arr2->GetScalar(0));
+  ASSERT_TRUE(ty2.Matches(Datum(arr2)));
+  ASSERT_TRUE(ty2.Matches(Datum(scalar2)));
+  ASSERT_FALSE(ty2.Matches(ty3));
+  ASSERT_FALSE(ty2.Matches(arr3));
 }
 
 // ----------------------------------------------------------------------
@@ -259,14 +260,14 @@ TEST(OutputType, Constructors) {
   AssertTypeEqual(*int8(), *ty1.type());
 
   auto DummyResolver = [](KernelContext*,
-                          const std::vector<ValueDescr>& args) -> Result<ValueDescr> {
-    return ValueDescr(int32(), GetBroadcastShape(args));
+                          const std::vector<TypeHolder>& args) -> Result<TypeHolder> {
+    return int32();
   };
   OutputType ty2(DummyResolver);
   ASSERT_EQ(OutputType::COMPUTED, ty2.kind());
 
-  ASSERT_OK_AND_ASSIGN(ValueDescr out_descr2, ty2.Resolve(nullptr, {}));
-  ASSERT_EQ(ValueDescr::Array(int32()), out_descr2);
+  ASSERT_OK_AND_ASSIGN(TypeHolder out_type2, ty2.Resolve(nullptr, {}));
+  ASSERT_EQ(int32(), out_type2);
 
   // Copy constructor
   OutputType ty3 = ty1;
@@ -275,8 +276,8 @@ TEST(OutputType, Constructors) {
 
   OutputType ty4 = ty2;
   ASSERT_EQ(OutputType::COMPUTED, ty4.kind());
-  ASSERT_OK_AND_ASSIGN(ValueDescr out_descr4, ty4.Resolve(nullptr, {}));
-  ASSERT_EQ(ValueDescr::Array(int32()), out_descr4);
+  ASSERT_OK_AND_ASSIGN(TypeHolder out_type4, ty4.Resolve(nullptr, {}));
+  ASSERT_EQ(int32(), out_type4);
 
   // Move constructor
   OutputType ty5 = std::move(ty1);
@@ -285,8 +286,8 @@ TEST(OutputType, Constructors) {
 
   OutputType ty6 = std::move(ty4);
   ASSERT_EQ(OutputType::COMPUTED, ty6.kind());
-  ASSERT_OK_AND_ASSIGN(ValueDescr out_descr6, ty6.Resolve(nullptr, {}));
-  ASSERT_EQ(ValueDescr::Array(int32()), out_descr6);
+  ASSERT_OK_AND_ASSIGN(TypeHolder out_type6, ty6.Resolve(nullptr, {}));
+  ASSERT_EQ(int32(), out_type6);
 
   // ToString
 
@@ -296,89 +297,60 @@ TEST(OutputType, Constructors) {
 }
 
 TEST(OutputType, Resolve) {
-  // Check shape promotion rules for FIXED kind
   OutputType ty1(int32());
 
-  ASSERT_OK_AND_ASSIGN(ValueDescr descr, ty1.Resolve(nullptr, {}));
-  ASSERT_EQ(ValueDescr::Array(int32()), descr);
+  ASSERT_OK_AND_ASSIGN(TypeHolder result, ty1.Resolve(nullptr, {}));
+  ASSERT_EQ(int32(), result);
 
-  ASSERT_OK_AND_ASSIGN(descr,
-                       ty1.Resolve(nullptr, {ValueDescr(int8(), ValueDescr::SCALAR)}));
-  ASSERT_EQ(ValueDescr::Scalar(int32()), descr);
+  ASSERT_OK_AND_ASSIGN(result, ty1.Resolve(nullptr, {int8()}));
+  ASSERT_EQ(int32(), result);
 
-  ASSERT_OK_AND_ASSIGN(descr,
-                       ty1.Resolve(nullptr, {ValueDescr(int8(), ValueDescr::SCALAR),
-                                             ValueDescr(int8(), ValueDescr::ARRAY)}));
-  ASSERT_EQ(ValueDescr::Array(int32()), descr);
+  ASSERT_OK_AND_ASSIGN(result, ty1.Resolve(nullptr, {int8(), int8()}));
+  ASSERT_EQ(int32(), result);
 
-  OutputType ty2([](KernelContext*, const std::vector<ValueDescr>& args) {
-    return ValueDescr(args[0].type, GetBroadcastShape(args));
-  });
+  OutputType ty2(
+      [](KernelContext*, const std::vector<TypeHolder>& args) { return args[0].type; });
 
-  ASSERT_OK_AND_ASSIGN(descr, ty2.Resolve(nullptr, {ValueDescr::Array(utf8())}));
-  ASSERT_EQ(ValueDescr::Array(utf8()), descr);
+  ASSERT_OK_AND_ASSIGN(result, ty2.Resolve(nullptr, {utf8()}));
+  ASSERT_EQ(utf8(), result);
 
   // Type resolver that returns an error
   OutputType ty3(
-      [](KernelContext* ctx, const std::vector<ValueDescr>& args) -> Result<ValueDescr> {
+      [](KernelContext* ctx, const std::vector<TypeHolder>& types) -> Result<TypeHolder> {
         // NB: checking the value types versus the function arity should be
         // validated elsewhere, so this is just for illustration purposes
-        if (args.size() == 0) {
+        if (types.size() == 0) {
           return Status::Invalid("Need at least one argument");
         }
-        return ValueDescr(args[0]);
+        return types[0];
       });
   ASSERT_RAISES(Invalid, ty3.Resolve(nullptr, {}));
 
-  // Type resolver that returns ValueDescr::ANY and needs type promotion
+  // Type resolver that returns a fixed value
   OutputType ty4(
-      [](KernelContext* ctx, const std::vector<ValueDescr>& args) -> Result<ValueDescr> {
+      [](KernelContext* ctx, const std::vector<TypeHolder>& types) -> Result<TypeHolder> {
         return int32();
       });
 
-  ASSERT_OK_AND_ASSIGN(descr, ty4.Resolve(nullptr, {ValueDescr::Array(int8())}));
-  ASSERT_EQ(ValueDescr::Array(int32()), descr);
-  ASSERT_OK_AND_ASSIGN(descr, ty4.Resolve(nullptr, {ValueDescr::Scalar(int8())}));
-  ASSERT_EQ(ValueDescr::Scalar(int32()), descr);
-}
-
-TEST(OutputType, ResolveDescr) {
-  ValueDescr d1 = ValueDescr::Scalar(int32());
-  ValueDescr d2 = ValueDescr::Array(int32());
-
-  OutputType ty1(d1);
-  OutputType ty2(d2);
-
-  ASSERT_EQ(ValueDescr::SCALAR, ty1.shape());
-  ASSERT_EQ(ValueDescr::ARRAY, ty2.shape());
-
-  {
-    ASSERT_OK_AND_ASSIGN(ValueDescr descr, ty1.Resolve(nullptr, {}));
-    ASSERT_EQ(d1, descr);
-  }
-
-  {
-    ASSERT_OK_AND_ASSIGN(ValueDescr descr, ty2.Resolve(nullptr, {}));
-    ASSERT_EQ(d2, descr);
-  }
+  ASSERT_OK_AND_ASSIGN(result, ty4.Resolve(nullptr, {int8()}));
+  ASSERT_EQ(int32(), result);
+  ASSERT_OK_AND_ASSIGN(result, ty4.Resolve(nullptr, {int8()}));
+  ASSERT_EQ(int32(), result);
 }
 
 // ----------------------------------------------------------------------
 // KernelSignature
 
 TEST(KernelSignature, Basics) {
-  // (any[int8], scalar[decimal]) -> utf8
-  std::vector<InputType> in_types({int8(), InputType(Type::DECIMAL, ValueDescr::SCALAR)});
+  // (int8, decimal) -> utf8
+  std::vector<InputType> in_types({int8(), InputType(Type::DECIMAL)});
   OutputType out_type(utf8());
 
   KernelSignature sig(in_types, out_type);
   ASSERT_EQ(2, sig.in_types().size());
   ASSERT_TRUE(sig.in_types()[0].type()->Equals(*int8()));
-  ASSERT_TRUE(sig.in_types()[0].Matches(ValueDescr::Scalar(int8())));
-  ASSERT_TRUE(sig.in_types()[0].Matches(ValueDescr::Array(int8())));
-
-  ASSERT_TRUE(sig.in_types()[1].Matches(ValueDescr::Scalar(decimal(12, 2))));
-  ASSERT_FALSE(sig.in_types()[1].Matches(ValueDescr::Array(decimal(12, 2))));
+  ASSERT_TRUE(sig.in_types()[0].Matches(*int8()));
+  ASSERT_TRUE(sig.in_types()[1].Matches(*decimal(12, 2)));
 }
 
 TEST(KernelSignature, Equals) {
@@ -393,10 +365,6 @@ TEST(KernelSignature, Equals) {
   KernelSignature sig4_copy({int8(), int16()}, utf8());
   KernelSignature sig5({int8(), int16(), int32()}, utf8());
 
-  // Differ in shape
-  KernelSignature sig6({ValueDescr::Scalar(int8())}, utf8());
-  KernelSignature sig7({ValueDescr::Array(int8())}, utf8());
-
   ASSERT_EQ(sig1, sig1);
 
   ASSERT_EQ(sig2, sig3);
@@ -408,8 +376,6 @@ TEST(KernelSignature, Equals) {
 
   // Match first 2 args, but not third
   ASSERT_NE(sig4, sig5);
-
-  ASSERT_NE(sig6, sig7);
 }
 
 TEST(KernelSignature, VarArgsEquals) {
@@ -441,40 +407,32 @@ TEST(KernelSignature, MatchesInputs) {
   ASSERT_TRUE(sig1.MatchesInputs({}));
   ASSERT_FALSE(sig1.MatchesInputs({int8()}));
 
-  // (any[int8], any[decimal]) -> boolean
+  // (int8, decimal) -> boolean
   KernelSignature sig2({int8(), InputType(Type::DECIMAL)}, boolean());
 
   ASSERT_FALSE(sig2.MatchesInputs({}));
   ASSERT_FALSE(sig2.MatchesInputs({int8()}));
   ASSERT_TRUE(sig2.MatchesInputs({int8(), decimal(12, 2)}));
-  ASSERT_TRUE(sig2.MatchesInputs(
-      {ValueDescr::Scalar(int8()), ValueDescr::Scalar(decimal(12, 2))}));
-  ASSERT_TRUE(
-      sig2.MatchesInputs({ValueDescr::Array(int8()), ValueDescr::Array(decimal(12, 2))}));
 
-  // (scalar[int8], array[int32]) -> boolean
-  KernelSignature sig3({ValueDescr::Scalar(int8()), ValueDescr::Array(int32())},
-                       boolean());
+  // (int8, int32) -> boolean
+  KernelSignature sig3({int8(), int32()}, boolean());
 
   ASSERT_FALSE(sig3.MatchesInputs({}));
 
   // Unqualified, these are ANY type and do not match because the kernel
   // requires a scalar and an array
-  ASSERT_FALSE(sig3.MatchesInputs({int8(), int32()}));
-  ASSERT_TRUE(
-      sig3.MatchesInputs({ValueDescr::Scalar(int8()), ValueDescr::Array(int32())}));
-  ASSERT_FALSE(
-      sig3.MatchesInputs({ValueDescr::Array(int8()), ValueDescr::Array(int32())}));
+  ASSERT_TRUE(sig3.MatchesInputs({int8(), int32()}));
+  ASSERT_FALSE(sig3.MatchesInputs({int8(), int16()}));
 }
 
 TEST(KernelSignature, VarArgsMatchesInputs) {
   {
     KernelSignature sig({int8()}, utf8(), /*is_varargs=*/true);
 
-    std::vector<ValueDescr> args = {int8()};
+    std::vector<TypeHolder> args = {int8()};
     ASSERT_TRUE(sig.MatchesInputs(args));
-    args.push_back(ValueDescr::Scalar(int8()));
-    args.push_back(ValueDescr::Array(int8()));
+    args.push_back(int8());
+    args.push_back(int8());
     ASSERT_TRUE(sig.MatchesInputs(args));
     args.push_back(int32());
     ASSERT_FALSE(sig.MatchesInputs(args));
@@ -482,10 +440,10 @@ TEST(KernelSignature, VarArgsMatchesInputs) {
   {
     KernelSignature sig({int8(), utf8()}, utf8(), /*is_varargs=*/true);
 
-    std::vector<ValueDescr> args = {int8()};
+    std::vector<TypeHolder> args = {int8()};
     ASSERT_TRUE(sig.MatchesInputs(args));
-    args.push_back(ValueDescr::Scalar(utf8()));
-    args.push_back(ValueDescr::Array(utf8()));
+    args.push_back(utf8());
+    args.push_back(utf8());
     ASSERT_TRUE(sig.MatchesInputs(args));
     args.push_back(int32());
     ASSERT_FALSE(sig.MatchesInputs(args));
@@ -493,23 +451,21 @@ TEST(KernelSignature, VarArgsMatchesInputs) {
 }
 
 TEST(KernelSignature, ToString) {
-  std::vector<InputType> in_types = {InputType(int8(), ValueDescr::SCALAR),
-                                     InputType(Type::DECIMAL, ValueDescr::ARRAY),
+  std::vector<InputType> in_types = {InputType(int8()), InputType(Type::DECIMAL),
                                      InputType(utf8())};
   KernelSignature sig(in_types, utf8());
-  ASSERT_EQ("(scalar[int8], array[Type::DECIMAL128], any[string]) -> string",
-            sig.ToString());
+  ASSERT_EQ("(int8, Type::DECIMAL128, string) -> string", sig.ToString());
 
-  OutputType out_type([](KernelContext*, const std::vector<ValueDescr>& args) {
+  OutputType out_type([](KernelContext*, const std::vector<TypeHolder>& args) {
     return Status::Invalid("NYI");
   });
-  KernelSignature sig2({int8(), InputType(Type::DECIMAL)}, out_type);
-  ASSERT_EQ("(any[int8], any[Type::DECIMAL128]) -> computed", sig2.ToString());
+  KernelSignature sig2({int8(), Type::DECIMAL}, out_type);
+  ASSERT_EQ("(int8, Type::DECIMAL128) -> computed", sig2.ToString());
 }
 
 TEST(KernelSignature, VarArgsToString) {
   KernelSignature sig({int8()}, utf8(), /*is_varargs=*/true);
-  ASSERT_EQ("varargs[any[int8]] -> string", sig.ToString());
+  ASSERT_EQ("varargs[int8] -> string", sig.ToString());
 }
 
 }  // namespace compute

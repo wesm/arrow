@@ -84,8 +84,7 @@ class ARROW_EXPORT ExecSpanIterator {
   /// \param[in] batch the input ExecBatch
   /// \param[in] max_chunksize the maximum length of each ExecSpan. Depending
   /// on the chunk layout of ChunkedArray.
-  Status Init(const ExecBatch& batch, ValueDescr::Shape output_shape = ValueDescr::ARRAY,
-              int64_t max_chunksize = kDefaultMaxChunksize);
+  Status Init(const ExecBatch& batch, int64_t max_chunksize = kDefaultMaxChunksize);
 
   /// \brief Compute the next span by updating the state of the
   /// previous span object. You must keep passing in the previous

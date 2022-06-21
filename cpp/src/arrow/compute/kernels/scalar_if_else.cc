@@ -1184,29 +1184,29 @@ struct ResolveIfElseExec<NullType, AllocateMem> {
 struct IfElseFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
 
     using arrow::compute::detail::DispatchExactImpl;
     // Do not DispatchExact here because it'll let through something like (bool,
     // timestamp[s], timestamp[s, "UTC"])
 
-    // if 0th descriptor is null, replace with bool
-    if (values->at(0).type->id() == Type::NA) {
-      values->at(0).type = boolean();
+    // if 0th type is null, replace with bool
+    if (types->at(0).type->id() == Type::NA) {
+      types->assign(0, boolean());
     }
 
-    // if-else 0'th descriptor is bool, so skip it
-    ValueDescr* left_arg = &(*values)[1];
+    // if-else 0'th type is bool, so skip it
+    TypeHolder* left_arg = &(*types)[1];
     constexpr size_t num_args = 2;
 
     internal::ReplaceNullWithOtherType(left_arg, num_args);
 
     // If both are identical dictionary types, dispatch to the dictionary kernel
     // TODO(ARROW-14105): apply implicit casts to dictionary types too
-    ValueDescr* right_arg = &(*values)[2];
+    TypeHolder* right_arg = &(*types)[2];
     if (is_dictionary(left_arg->type->id()) && left_arg->type->Equals(right_arg->type)) {
-      auto kernel = DispatchExactImpl(this, *values);
+      auto kernel = DispatchExactImpl(this, *types);
       DCHECK(kernel);
       return kernel;
     }
@@ -1219,13 +1219,13 @@ struct IfElseFunction : ScalarFunction {
       internal::ReplaceTypes(type, left_arg, num_args);
     } else if (auto type = internal::CommonBinary(left_arg, num_args)) {
       internal::ReplaceTypes(type, left_arg, num_args);
-    } else if (HasDecimal(*values)) {
+    } else if (HasDecimal(*types)) {
       RETURN_NOT_OK(CastDecimalArgs(left_arg, num_args));
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 
@@ -1384,21 +1384,21 @@ void CopyOneValue(const ExecValue& in_values, const int64_t in_offset, uint8_t* 
 struct CaseWhenFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
     // The first function is a struct of booleans, where the number of fields in the
     // struct is either equal to the number of other arguments or is one less.
-    RETURN_NOT_OK(CheckArity(*values));
-    auto first_type = (*values)[0].type;
+    RETURN_NOT_OK(CheckArity(types->size()));
+    auto first_type = (*types)[0].type;
     if (first_type->id() != Type::STRUCT) {
       return Status::TypeError("case_when: first argument must be STRUCT, not ",
                                *first_type);
     }
     auto num_fields = static_cast<size_t>(first_type->num_fields());
-    if (num_fields < values->size() - 2 || num_fields >= values->size()) {
+    if (num_fields < types->size() - 2 || num_fields >= types->size()) {
       return Status::Invalid(
           "case_when: number of struct fields must be equal to or one less than count of "
           "remaining arguments (",
-          values->size() - 1, "), got: ", first_type->num_fields());
+          types->size() - 1, "), got: ", first_type->num_fields());
     }
     for (const auto& field : first_type->fields()) {
       if (field->type()->id() != Type::BOOL) {
@@ -1409,18 +1409,17 @@ struct CaseWhenFunction : ScalarFunction {
     }
 
     // TODO(ARROW-14105): also apply casts to dictionary indices/values
-    if (is_dictionary((*values)[1].type->id()) &&
-        std::all_of(values->begin() + 2, values->end(), [&](const ValueDescr& descr) {
-          return descr.type->Equals(*(*values)[1].type);
-        })) {
-      auto kernel = DispatchExactImpl(this, *values);
+    if (is_dictionary((*types)[1].type->id()) &&
+        std::all_of(types->begin() + 2, types->end(),
+                    [&](const TypeHolder& type) { return type == (*types)[1]; })) {
+      auto kernel = DispatchExactImpl(this, *types);
       DCHECK(kernel);
       return kernel;
     }
 
-    EnsureDictionaryDecoded(values);
-    ValueDescr* first_arg = &(*values)[1];
-    const size_t num_args = values->size() - 1;
+    EnsureDictionaryDecoded(types);
+    TypeHolder* first_arg = &(*types)[1];
+    const size_t num_args = types->size() - 1;
     if (auto type = CommonNumeric(first_arg, num_args)) {
       ReplaceTypes(type, first_arg, num_args);
     }
@@ -1430,11 +1429,11 @@ struct CaseWhenFunction : ScalarFunction {
     if (auto type = CommonTemporal(first_arg, num_args)) {
       ReplaceTypes(type, first_arg, num_args);
     }
-    if (HasDecimal(*values)) {
+    if (HasDecimal(*types)) {
       RETURN_NOT_OK(CastDecimalArgs(first_arg, num_args));
     }
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 
@@ -1461,11 +1460,6 @@ Status ExecScalarCaseWhen(KernelContext* ctx, const ExecSpan& batch, ExecResult*
       has_result = true;
       break;
     }
-  }
-  if (out->is_scalar()) {
-    out->value =
-        result.is_scalar() ? result.scalar->Copy() : MakeNullScalar(out->type()->Copy());
-    return Status::OK();
   }
 
   std::shared_ptr<Scalar> temp;
@@ -1666,12 +1660,6 @@ Status ExecVarWidthScalarCaseWhen(KernelContext* ctx, const ExecSpan& batch,
       has_result = true;
       break;
     }
-  }
-  if (out->is_scalar()) {
-    DCHECK(result.is_scalar() || !has_result);
-    out->value =
-        result.is_scalar() ? result.scalar->Copy() : MakeNullScalar(out->type()->Copy());
-    return Status::OK();
   }
   if (!has_result) {
     // All conditions false, no 'else' argument
@@ -1949,49 +1937,37 @@ struct CaseWhenFunctor<DictionaryType> {
 struct CoalesceFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
     using arrow::compute::detail::DispatchExactImpl;
 
     // TODO(ARROW-14105): also apply casts to dictionary indices/values
-    if (is_dictionary((*values)[0].type->id()) &&
-        std::all_of(values->begin() + 1, values->end(), [&](const ValueDescr& descr) {
-          return descr.type->Equals(*(*values)[0].type);
-        })) {
-      auto kernel = DispatchExactImpl(this, *values);
+    if (is_dictionary((*types)[0].type->id()) &&
+        std::all_of(types->begin() + 1, types->end(),
+                    [&](const TypeHolder& type) { return type == (*types)[0]; })) {
+      auto kernel = DispatchExactImpl(this, *types);
       DCHECK(kernel);
       return kernel;
     }
 
     // Do not DispatchExact here since we want to rescale decimals if necessary
-    EnsureDictionaryDecoded(values);
-    if (auto type = CommonNumeric(values->data(), values->size())) {
-      ReplaceTypes(type, values);
+    EnsureDictionaryDecoded(types);
+    if (auto type = CommonNumeric(types->data(), types->size())) {
+      ReplaceTypes(type, types);
     }
-    if (auto type = CommonBinary(values->data(), values->size())) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonBinary(types->data(), types->size())) {
+      ReplaceTypes(type, types);
     }
-    if (auto type = CommonTemporal(values->data(), values->size())) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonTemporal(types->data(), types->size())) {
+      ReplaceTypes(type, types);
     }
-    if (HasDecimal(*values)) {
-      RETURN_NOT_OK(CastDecimalArgs(values->data(), values->size()));
+    if (HasDecimal(*types)) {
+      RETURN_NOT_OK(CastDecimalArgs(types->data(), types->size()));
     }
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
-
-// Implement a 'coalesce' (SQL) operator for any number of scalar inputs
-Status ExecScalarCoalesce(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-  for (const auto& value : batch.values) {
-    if (value.scalar->is_valid) {
-      out->value = value.scalar->Copy();
-      break;
-    }
-  }
-  return Status::OK();
-}
 
 // Helper: copy from a source value into all null slots of the output
 template <typename Type>
@@ -2326,12 +2302,7 @@ struct CoalesceFunctor {
     if (batch.num_values() == 2) {
       return ExecBinaryCoalesce<Type>(ctx, batch[0], batch[1], batch.length, out);
     }
-    for (const auto& value : batch.values) {
-      if (value.is_array()) {
-        return ExecArrayCoalesce<Type>(ctx, batch, out);
-      }
-    }
-    return ExecScalarCoalesce(ctx, batch, out);
+    return ExecArrayCoalesce<Type>(ctx, batch, out);
   }
 };
 
@@ -2352,12 +2323,7 @@ struct CoalesceFunctor<Type, enable_if_base_binary<Type>> {
       // Specialized implementation for common case ('fill_null' operation)
       return ExecArrayScalar(ctx, batch[0].array, *batch[1].scalar, out);
     }
-    for (const auto& value : batch.values) {
-      if (value.is_array()) {
-        return ExecArray(ctx, batch, out);
-      }
-    }
-    return ExecScalarCoalesce(ctx, batch, out);
+    return ExecArray(ctx, batch, out);
   }
 
   static Status ExecArrayScalar(KernelContext* ctx, const ArraySpan& left,
@@ -2424,12 +2390,7 @@ struct CoalesceFunctor<
                       !is_union_type<Type>::value>> {
   static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     RETURN_NOT_OK(CheckIdenticalTypes(&batch.values[0], batch.num_values()));
-    for (const auto& value : batch.values) {
-      if (value.is_array()) {
-        return ExecArray(ctx, batch, out);
-      }
-    }
-    return ExecScalarCoalesce(ctx, batch, out);
+    return ExecArray(ctx, batch, out);
   }
 
   static Status ExecArray(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
@@ -2541,16 +2502,10 @@ Status ExecScalarChoose(KernelContext* ctx, const ExecSpan& batch, ExecResult* o
     return Status::IndexError("choose: index ", index, " out of range");
   }
   auto source = batch[index + 1];
-  if (out->is_scalar()) {
-    // All inputs to choose were scalar values
-    out->value = source.scalar->Copy();
-  } else {
-    ArraySpan* output = out->array_span();
-    CopyValues<Type>(source, /*row=*/0, batch.length,
-                     output->GetValues<uint8_t>(0, /*absolute_offset=*/0),
-                     output->GetValues<uint8_t>(1, /*absolute_offset=*/0),
-                     output->offset);
-  }
+  ArraySpan* output = out->array_span();
+  CopyValues<Type>(source, /*row=*/0, batch.length,
+                   output->GetValues<uint8_t>(0, /*absolute_offset=*/0),
+                   output->GetValues<uint8_t>(1, /*absolute_offset=*/0), output->offset);
   return Status::OK();
 }
 
@@ -2629,15 +2584,10 @@ struct ChooseFunctor<Type, enable_if_base_binary<Type>> {
       }
       const ExecValue& source = batch.values[index + 1];
       if (source.is_scalar()) {
-        if (out->is_array_data()) {
-          ARROW_ASSIGN_OR_RAISE(
-              std::shared_ptr<Array> temp_array,
-              MakeArrayFromScalar(*source.scalar, batch.length, ctx->memory_pool()));
-          out->value = std::move(temp_array->data());
-        } else {
-          DCHECK(out->is_scalar());
-          out->value = source.scalar->Copy();
-        }
+        ARROW_ASSIGN_OR_RAISE(
+            std::shared_ptr<Array> temp_array,
+            MakeArrayFromScalar(*source.scalar, batch.length, ctx->memory_pool()));
+        out->value = std::move(temp_array->data());
       } else {
         DCHECK(out->is_array_data());
         // source is an array
@@ -2711,10 +2661,10 @@ struct ChooseFunctor<Type, enable_if_base_binary<Type>> {
 struct ChooseFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* values) const override {
     // The first argument is always int64 or promoted to it. The kernel is dispatched
     // based on the type of the rest of the arguments.
-    RETURN_NOT_OK(CheckArity(*values));
+    RETURN_NOT_OK(CheckArity(values->size()));
     EnsureDictionaryDecoded(values);
     if (values->front().type->id() != Type::INT64) {
       values->front().type = int64();

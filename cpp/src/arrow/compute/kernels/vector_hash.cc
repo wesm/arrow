@@ -698,13 +698,13 @@ Status ValueCountsFinalizeDictionary(KernelContext* ctx, std::vector<Datum>* out
   return Status::OK();
 }
 
-ValueDescr DictEncodeOutput(KernelContext*, const std::vector<ValueDescr>& descrs) {
-  return ValueDescr::Array(dictionary(int32(), descrs[0].type));
+TypeHolder DictEncodeOutput(KernelContext*, const std::vector<TypeHolder>& types) {
+  return dictionary(int32(), types[0].type);
 }
 
-ValueDescr ValueCountsOutput(KernelContext*, const std::vector<ValueDescr>& descrs) {
-  return ValueDescr::Array(struct_(
-      {field(kValuesFieldName, descrs[0].type), field(kCountsFieldName, int64())}));
+TypeHolder ValueCountsOutput(KernelContext*, const std::vector<TypeHolder>& types) {
+  return struct_(
+      {field(kValuesFieldName, types[0].type), field(kCountsFieldName, int64())}));
 }
 
 template <typename Action>

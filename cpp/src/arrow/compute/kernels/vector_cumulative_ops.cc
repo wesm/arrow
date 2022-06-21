@@ -196,8 +196,7 @@ void MakeVectorCumulativeFunction(FunctionRegistry* registry, const std::string 
     kernel.can_execute_chunkwise = false;
     kernel.null_handling = NullHandling::type::COMPUTED_NO_PREALLOCATE;
     kernel.mem_allocation = MemAllocation::type::NO_PREALLOCATE;
-    kernel.signature =
-        KernelSignature::Make({InputType::Array(ty)}, OutputType(ValueDescr(ty)));
+    kernel.signature = KernelSignature::Make({ty}, OutputType(ty));
     kernel.exec =
         ArithmeticExecFromOp<CumulativeKernel, Op, ArrayKernelExec, OptionsType>(ty);
     kernel.exec_chunked =

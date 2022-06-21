@@ -20,7 +20,6 @@
 namespace arrow {
 
 struct Datum;
-struct ValueDescr;
 
 namespace compute {
 
@@ -36,6 +35,7 @@ class KernelContext;
 struct Kernel;
 struct ScalarKernel;
 struct ScalarAggregateKernel;
+struct TypeHolder;
 struct VectorKernel;
 
 struct KernelState;

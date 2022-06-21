@@ -249,9 +249,7 @@ Result<std::unique_ptr<ExecBatchIterator>> ExecBatchIterator::Make(
     }
   }
 
-  // If the arguments are all scalars, then the length is 1
-  int64_t length = 1;
-
+  int64_t length = -1;
   bool length_set = false;
   for (auto& arg : args) {
     if (arg.is_scalar()) {
@@ -266,6 +264,7 @@ Result<std::unique_ptr<ExecBatchIterator>> ExecBatchIterator::Make(
       }
     }
   }
+  DCHECK(length_set) << "Arguments cannot all be scalar";
 
   max_chunksize = std::min(length, max_chunksize);
 
@@ -328,8 +327,7 @@ bool ExecBatchIterator::Next(ExecBatch* batch) {
 // ----------------------------------------------------------------------
 // ExecSpanIterator; to eventually replace ExecBatchIterator
 
-Status ExecSpanIterator::Init(const ExecBatch& batch, ValueDescr::Shape output_shape,
-                              int64_t max_chunksize) {
+Status ExecSpanIterator::Init(const ExecBatch& batch, int64_t max_chunksize) {
   if (batch.num_values() > 0) {
     // Validate arguments
     bool all_args_same_length = false;
@@ -344,7 +342,7 @@ Status ExecSpanIterator::Init(const ExecBatch& batch, ValueDescr::Shape output_s
   args_ = &batch.values;
   initialized_ = have_chunked_arrays_ = false;
   position_ = 0;
-  length_ = output_shape == ValueDescr::SCALAR ? 1 : batch.length;
+  length_ = batch.length;
   chunk_indexes_.clear();
   chunk_indexes_.resize(args_->size(), 0);
   value_positions_.clear();
@@ -358,8 +356,7 @@ Status ExecSpanIterator::Init(const ExecBatch& batch, ValueDescr::Shape output_s
 int64_t ExecSpanIterator::GetNextChunkSpan(int64_t iteration_size, ExecSpan* span) {
   for (size_t i = 0; i < args_->size() && iteration_size > 0; ++i) {
     // If the argument is not a chunked array, it's either a Scalar or Array,
-    // in which case it doesn't influence the size of this span. Note that if
-    // the args are all scalars the span length is 1
+    // in which case it doesn't influence the size of this span
     if (!args_->at(i).is_chunked_array()) {
       continue;
     }
@@ -691,9 +688,9 @@ class KernelExecutorImpl : public KernelExecutor {
     kernel_ctx_ = kernel_ctx;
     kernel_ = static_cast<const KernelType*>(args.kernel);
 
-    // Resolve the output descriptor for this kernel
+    // Resolve the output type for this kernel
     ARROW_ASSIGN_OR_RAISE(
-        output_descr_, kernel_->signature->out_type().Resolve(kernel_ctx_, args.inputs));
+        output_type_, kernel_->signature->out_type().Resolve(kernel_ctx_, args.inputs));
 
     return Status::OK();
   }
@@ -703,7 +700,7 @@ class KernelExecutorImpl : public KernelExecutor {
   // Kernel::mem_allocation is not MemAllocation::PREALLOCATE, then no
   // data buffers will be set
   Result<std::shared_ptr<ArrayData>> PrepareOutput(int64_t length) {
-    auto out = std::make_shared<ArrayData>(output_descr_.type, length);
+    auto out = std::make_shared<ArrayData>(output_type_.GetSharedPtr(), length);
     out->buffers.resize(output_num_buffers_);
 
     if (validity_preallocated_) {
@@ -726,10 +723,10 @@ class KernelExecutorImpl : public KernelExecutor {
 
   Status CheckResultType(const Datum& out, const char* function_name) override {
     const auto& type = out.type();
-    if (type != nullptr && !type->Equals(output_descr_.type)) {
+    if (type != nullptr && !type->Equals(*output_type_.type)) {
       return Status::TypeError(
           "kernel type result mismatch for function '", function_name, "': declared as ",
-          output_descr_.type->ToString(), ", actual is ", type->ToString());
+          output_type_.type->ToString(), ", actual is ", type->ToString());
     }
     return Status::OK();
   }
@@ -741,7 +738,7 @@ class KernelExecutorImpl : public KernelExecutor {
 
   KernelContext* kernel_ctx_;
   const KernelType* kernel_;
-  ValueDescr output_descr_;
+  TypeHolder output_type_;
 
   int output_num_buffers_;
 
@@ -757,17 +754,13 @@ class KernelExecutorImpl : public KernelExecutor {
 class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
  public:
   Status Execute(const ExecBatch& batch, ExecListener* listener) override {
-    RETURN_NOT_OK(span_iterator_.Init(batch, output_descr_.shape,
-                                      exec_context()->exec_chunksize()));
+    RETURN_NOT_OK(span_iterator_.Init(batch, exec_context()->exec_chunksize()));
 
-    // TODO(wesm): remove if with ARROW-16757
-    if (output_descr_.shape != ValueDescr::SCALAR) {
-      // If the executor is configured to produce a single large Array output for
-      // kernels supporting preallocation, then we do so up front and then
-      // iterate over slices of that large array. Otherwise, we preallocate prior
-      // to processing each span emitted from the ExecSpanIterator
-      RETURN_NOT_OK(SetupPreallocation(span_iterator_.length(), batch.values));
-    }
+    // If the executor is configured to produce a single large Array output for
+    // kernels supporting preallocation, then we do so up front and then
+    // iterate over slices of that large array. Otherwise, we preallocate prior
+    // to processing each span emitted from the ExecSpanIterator
+    RETURN_NOT_OK(SetupPreallocation(span_iterator_.length(), batch.values));
 
     // ARROW-16756: Here we have to accommodate the distinct cases
     //
@@ -784,26 +777,19 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
 
   Datum WrapResults(const std::vector<Datum>& inputs,
                     const std::vector<Datum>& outputs) override {
-    if (output_descr_.shape == ValueDescr::SCALAR) {
-      // TODO(wesm): to remove, see ARROW-16757
-      DCHECK_EQ(outputs.size(), 1);
-      // Return as SCALAR
+    // If execution yielded multiple chunks (because large arrays were split
+    // based on the ExecContext parameters, then the result is a ChunkedArray
+    if (HaveChunkedArray(inputs) || outputs.size() > 1) {
+      return ToChunkedArray(outputs, output_descr_.type);
+    } else if (outputs.size() == 1) {
+      // Outputs have just one element
       return outputs[0];
     } else {
-      // If execution yielded multiple chunks (because large arrays were split
-      // based on the ExecContext parameters, then the result is a ChunkedArray
-      if (HaveChunkedArray(inputs) || outputs.size() > 1) {
-        return ToChunkedArray(outputs, output_descr_.type);
-      } else if (outputs.size() == 1) {
-        // Outputs have just one element
-        return outputs[0];
-      } else {
-        // XXX: In the case where no outputs are omitted, is returning a 0-length
-        // array always the correct move?
-        return MakeArrayOfNull(output_descr_.type, /*length=*/0,
-                               exec_context()->memory_pool())
-            .ValueOrDie();
-      }
+      // XXX: In the case where no outputs are omitted, is returning a 0-length
+      // array always the correct move?
+      return MakeArrayOfNull(output_descr_.type, /*length=*/0,
+                             exec_context()->memory_pool())
+          .ValueOrDie();
     }
   }
 
@@ -850,7 +836,7 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
 
   Status ExecuteSingleSpan(const ExecSpan& input, ExecResult* out) {
     ArraySpan* result_span = out->array_span();
-    if (output_descr_.type->id() == Type::NA) {
+    if (output_type_.type->id() == Type::NA) {
       result_span->null_count = result_span->length;
     } else if (kernel_->null_handling == NullHandling::INTERSECTION) {
       if (!elide_validity_bitmap_) {
@@ -859,7 +845,10 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
     } else if (kernel_->null_handling == NullHandling::OUTPUT_NOT_NULL) {
       result_span->null_count = 0;
     }
-    return kernel_->exec(kernel_ctx_, input, out);
+    RETURN_NOT_OK(kernel_->exec(kernel_ctx_, input, out));
+    // Output type didn't change
+    DCHECK(output.is_array_span());
+    return Status::OK();
   }
 
   Status ExecuteNonSpans(ExecListener* listener) {
@@ -873,60 +862,32 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
     ExecSpan input;
     ExecResult output;
     while (span_iterator_.Next(&input)) {
-      if (output_descr_.shape == ValueDescr::ARRAY) {
-        ARROW_ASSIGN_OR_RAISE(output.value, PrepareOutput(input.length));
-        DCHECK(output.is_array_data());
-      } else {
-        // For scalar outputs, we set a null scalar of the correct type to
-        // communicate the output type to the kernel if needed
-        //
-        // XXX: Is there some way to avoid this step?
-        // TODO: Remove this path in ARROW-16757
-        output.value = MakeNullScalar(output_descr_.type);
-      }
+      ARROW_ASSIGN_OR_RAISE(output.value, PrepareOutput(input.length));
+      DCHECK(output.is_array_data());
 
-      if (output_descr_.shape == ValueDescr::ARRAY) {
-        ArrayData* out_arr = output.array_data().get();
-        if (output_descr_.type->id() == Type::NA) {
-          out_arr->null_count = out_arr->length;
-        } else if (kernel_->null_handling == NullHandling::INTERSECTION) {
-          RETURN_NOT_OK(PropagateNulls(kernel_ctx_, input, out_arr));
-        } else if (kernel_->null_handling == NullHandling::OUTPUT_NOT_NULL) {
-          out_arr->null_count = 0;
-        }
-      } else {
-        // TODO(wesm): to remove, see ARROW-16757
-        if (kernel_->null_handling == NullHandling::INTERSECTION) {
-          // set scalar validity
-          output.scalar()->is_valid =
-              std::all_of(input.values.begin(), input.values.end(),
-                          [](const ExecValue& input) { return input.scalar->is_valid; });
-        } else if (kernel_->null_handling == NullHandling::OUTPUT_NOT_NULL) {
-          output.scalar()->is_valid = true;
-        }
+      ArrayData* out_arr = output.array_data().get();
+      if (output_type_.type->id() == Type::NA) {
+        out_arr->null_count = out_arr->length;
+      } else if (kernel_->null_handling == NullHandling::INTERSECTION) {
+        RETURN_NOT_OK(PropagateNulls(kernel_ctx_, input, out_arr));
+      } else if (kernel_->null_handling == NullHandling::OUTPUT_NOT_NULL) {
+        out_arr->null_count = 0;
       }
 
       RETURN_NOT_OK(kernel_->exec(kernel_ctx_, input, &output));
 
-      // Assert that the kernel did not alter the shape of the output
-      // type. After ARROW-16577 delete this since ValueDescr::SCALAR will not
-      // exist anymore
-      DCHECK(((output_descr_.shape == ValueDescr::ARRAY) && output.is_array_data()) ||
-             ((output_descr_.shape == ValueDescr::SCALAR) && output.is_scalar()));
+      // Output type didn't change
+      DCHECK(output.is_array_data());
 
       // Emit a result for each chunk
-      if (output_descr_.shape == ValueDescr::ARRAY) {
-        RETURN_NOT_OK(listener->OnResult(output.array_data()));
-      } else {
-        RETURN_NOT_OK(listener->OnResult(output.scalar()));
-      }
+      RETURN_NOT_OK(listener->OnResult(output.array_data()));
     }
     return Status::OK();
   }
 
   Status SetupPreallocation(int64_t total_length, const std::vector<Datum>& args) {
-    output_num_buffers_ = static_cast<int>(output_descr_.type->layout().buffers.size());
-    auto out_type_id = output_descr_.type->id();
+    output_num_buffers_ = static_cast<int>(output_type_.type->layout().buffers.size());
+    auto out_type_id = output_type_.type->id();
     // Default to no validity pre-allocation for following cases:
     // - Output Array is NullArray
     // - kernel_->null_handling is COMPUTED_NO_PREALLOCATE or OUTPUT_NOT_NULL
@@ -998,11 +959,6 @@ class ScalarExecutor : public KernelExecutorImpl<ScalarKernel> {
 class VectorExecutor : public KernelExecutorImpl<VectorKernel> {
  public:
   Status Execute(const ExecBatch& batch, ExecListener* listener) override {
-    // TODO(wesm): remove in ARROW-16577
-    if (output_descr_.shape == ValueDescr::SCALAR) {
-      return Status::Invalid("VectorExecutor only supports array output types");
-    }
-
     // Some vector kernels have a separate code path for handling
     // chunked arrays (VectorKernel::exec_chunked) so we check if we
     // have any chunked arrays. If we do and an exec_chunked function
@@ -1012,19 +968,18 @@ class VectorExecutor : public KernelExecutorImpl<VectorKernel> {
       if (arg.is_chunked_array()) have_chunked_arrays = true;
     }
 
-    output_num_buffers_ = static_cast<int>(output_descr_.type->layout().buffers.size());
+    output_num_buffers_ = static_cast<int>(output_type_.type->layout().buffers.size());
 
     // Decide if we need to preallocate memory for this kernel
     validity_preallocated_ =
         (kernel_->null_handling != NullHandling::COMPUTED_NO_PREALLOCATE &&
          kernel_->null_handling != NullHandling::OUTPUT_NOT_NULL);
     if (kernel_->mem_allocation == MemAllocation::PREALLOCATE) {
-      ComputeDataPreallocate(*output_descr_.type, &data_preallocated_);
+      ComputeDataPreallocate(*output_type_.type, &data_preallocated_);
     }
 
     if (kernel_->can_execute_chunkwise) {
-      RETURN_NOT_OK(span_iterator_.Init(batch, output_descr_.shape,
-                                        exec_context()->exec_chunksize()));
+      RETURN_NOT_OK(span_iterator_.Init(batch, exec_context()->exec_chunksize()));
       ExecSpan span;
       while (span_iterator_.Next(&span)) {
         RETURN_NOT_OK(Exec(span, listener));
@@ -1058,14 +1013,14 @@ class VectorExecutor : public KernelExecutorImpl<VectorKernel> {
     // If execution yielded multiple chunks (because large arrays were split
     // based on the ExecContext parameters, then the result is a ChunkedArray
     if (kernel_->output_chunked && (HaveChunkedArray(inputs) || outputs.size() > 1)) {
-      return ToChunkedArray(outputs, output_descr_.type);
+      return ToChunkedArray(outputs, output_type_.GetSharedPtr());
     } else if (outputs.size() == 1) {
       // Outputs have just one element
       return outputs[0];
     } else {
       // XXX: In the case where no outputs are omitted, is returning a 0-length
       // array always the correct move?
-      return MakeArrayOfNull(output_descr_.type, /*length=*/0).ValueOrDie();
+      return MakeArrayOfNull(output_descr_.GetSharedPtr(), /*length=*/0).ValueOrDie();
     }
   }
 
@@ -1124,7 +1079,7 @@ class VectorExecutor : public KernelExecutorImpl<VectorKernel> {
 class ScalarAggExecutor : public KernelExecutorImpl<ScalarAggregateKernel> {
  public:
   Status Init(KernelContext* ctx, KernelInitArgs args) override {
-    input_descrs_ = &args.inputs;
+    input_types_ = &args.inputs;
     options_ = args.options;
     return KernelExecutorImpl<ScalarAggregateKernel>::Init(ctx, args);
   }
@@ -1160,9 +1115,8 @@ class ScalarAggExecutor : public KernelExecutorImpl<ScalarAggregateKernel> {
  private:
   Status Consume(const ExecBatch& batch) {
     // FIXME(ARROW-11840) don't merge *any* aggegates for every batch
-    ARROW_ASSIGN_OR_RAISE(
-        auto batch_state,
-        kernel_->init(kernel_ctx_, {kernel_, *input_descrs_, options_}));
+    ARROW_ASSIGN_OR_RAISE(auto batch_state,
+                          kernel_->init(kernel_ctx_, {kernel_, *input_types_, options_}));
 
     if (batch_state == nullptr) {
       return Status::Invalid("ScalarAggregation requires non-null kernel state");
@@ -1177,7 +1131,7 @@ class ScalarAggExecutor : public KernelExecutorImpl<ScalarAggregateKernel> {
   }
 
   std::unique_ptr<ExecBatchIterator> batch_iterator_;
-  const std::vector<ValueDescr>* input_descrs_;
+  const std::vector<TypeHolder>* input_descrs_;
   const FunctionOptions* options_;
 };
 

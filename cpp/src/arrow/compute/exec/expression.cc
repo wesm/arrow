@@ -64,7 +64,7 @@ Expression::Expression(Parameter parameter)
 Expression literal(Datum lit) { return Expression(std::move(lit)); }
 
 Expression field_ref(FieldRef ref) {
-  return Expression(Expression::Parameter{std::move(ref), ValueDescr{}, {-1}});
+  return Expression(Expression::Parameter{std::move(ref), TypeHolder{}, {-1}});
 }
 
 Expression call(std::string function, std::vector<Expression> arguments,
@@ -93,36 +93,18 @@ const Expression::Call* Expression::call() const {
   return util::get_if<Call>(impl_.get());
 }
 
-ValueDescr Expression::descr() const {
-  if (impl_ == nullptr) return {};
-
-  if (auto lit = literal()) {
-    return lit->descr();
-  }
-
-  if (auto parameter = this->parameter()) {
-    return parameter->descr;
-  }
-
-  return CallNotNull(*this)->descr;
-}
-
-// This is a module-global singleton to avoid synchronization costs of a
-// function-static singleton.
-static const std::shared_ptr<DataType> kNoType;
-
-const std::shared_ptr<DataType>& Expression::type() const {
-  if (impl_ == nullptr) return kNoType;
+TypeHolder Expression::type() const {
+  if (impl_ == nullptr) return nullptr;
 
   if (auto lit = literal()) {
     return lit->type();
   }
 
-  if (auto parameter = this->parameter()) {
-    return parameter->descr.type;
+  if (const Parameter parameter = this->parameter()) {
+    return parameter->type;
   }
 
-  return CallNotNull(*this)->descr.type;
+  return CallNotNull(*this)->type;
 }
 
 namespace {
@@ -276,7 +258,7 @@ size_t Expression::hash() const {
 bool Expression::IsBound() const {
   if (type() == nullptr) return false;
 
-  if (auto call = this->call()) {
+  if (const Call* call = this->call()) {
     if (call->kernel == nullptr) return false;
 
     for (const Expression& arg : call->arguments) {
@@ -382,25 +364,20 @@ Result<Expression> BindNonRecursive(Expression::Call call, bool insert_implicit_
   DCHECK(std::all_of(call.arguments.begin(), call.arguments.end(),
                      [](const Expression& argument) { return argument.IsBound(); }));
 
-  auto descrs = GetDescriptors(call.arguments);
+  std::vector<TypeHolder> types = GetTypes(call.arguments);
   ARROW_ASSIGN_OR_RAISE(call.function, GetFunction(call, exec_context));
 
   if (!insert_implicit_casts) {
-    ARROW_ASSIGN_OR_RAISE(call.kernel, call.function->DispatchExact(descrs));
+    ARROW_ASSIGN_OR_RAISE(call.kernel, call.function->DispatchExact(types));
   } else {
-    ARROW_ASSIGN_OR_RAISE(call.kernel, call.function->DispatchBest(&descrs));
+    ARROW_ASSIGN_OR_RAISE(call.kernel, call.function->DispatchBest(&types));
 
     for (size_t i = 0; i < descrs.size(); ++i) {
-      if (descrs[i] == call.arguments[i].descr()) continue;
+      if (descrs[i] == call.arguments[i].type()) continue;
 
-      if (descrs[i].shape != call.arguments[i].descr().shape) {
-        return Status::NotImplemented(
-            "Automatic broadcasting of scalars arguments to arrays in ",
-            Expression(std::move(call)).ToString());
-      }
-
-      if (auto lit = call.arguments[i].literal()) {
-        ARROW_ASSIGN_OR_RAISE(Datum new_lit, compute::Cast(*lit, descrs[i].type));
+      if (const Datum* lit = call.arguments[i].literal()) {
+        ARROW_ASSIGN_OR_RAISE(Datum new_lit,
+                              compute::Cast(*lit, types[i].GetSharedPtr()));
         call.arguments[i] = literal(std::move(new_lit));
         continue;
       }
@@ -409,8 +386,10 @@ Result<Expression> BindNonRecursive(Expression::Call call, bool insert_implicit_
       Expression::Call implicit_cast;
       implicit_cast.function_name = "cast";
       implicit_cast.arguments = {std::move(call.arguments[i])};
+
+      // TODO(wesm): Use TypeHolder in options
       implicit_cast.options = std::make_shared<compute::CastOptions>(
-          compute::CastOptions::Safe(descrs[i].type));
+          compute::CastOptions::Safe(types[i].GetSharedPtr()));
 
       ARROW_ASSIGN_OR_RAISE(
           call.arguments[i],
@@ -425,23 +404,23 @@ Result<Expression> BindNonRecursive(Expression::Call call, bool insert_implicit_
         call.options ? call.options.get() : call.function->default_options();
     ARROW_ASSIGN_OR_RAISE(
         call.kernel_state,
-        call.kernel->init(&kernel_context, {call.kernel, descrs, options}));
+        call.kernel->init(&kernel_context, {call.kernel, types, options}));
 
     kernel_context.SetState(call.kernel_state.get());
   }
 
   ARROW_ASSIGN_OR_RAISE(
-      call.descr, call.kernel->signature->out_type().Resolve(&kernel_context, descrs));
+      call.type, call.kernel->signature->out_type().Resolve(&kernel_context, types));
 
   return Expression(std::move(call));
 }
 
 template <typename TypeOrSchema>
 Result<Expression> BindImpl(Expression expr, const TypeOrSchema& in,
-                            ValueDescr::Shape shape, compute::ExecContext* exec_context) {
+                            compute::ExecContext* exec_context) {
   if (exec_context == nullptr) {
     compute::ExecContext exec_context;
-    return BindImpl(std::move(expr), in, shape, &exec_context);
+    return BindImpl(std::move(expr), in, &exec_context);
   }
 
   if (expr.literal()) return expr;
@@ -454,14 +433,12 @@ Result<Expression> BindImpl(Expression expr, const TypeOrSchema& in,
     std::copy(path.indices().begin(), path.indices().end(), bound.indices.begin());
     ARROW_ASSIGN_OR_RAISE(auto field, path.Get(in));
     bound.descr.type = field->type();
-    bound.descr.shape = shape;
     return Expression{std::move(bound)};
   }
 
   auto call = *CallNotNull(expr);
   for (auto& argument : call.arguments) {
-    ARROW_ASSIGN_OR_RAISE(argument,
-                          BindImpl(std::move(argument), in, shape, exec_context));
+    ARROW_ASSIGN_OR_RAISE(argument, BindImpl(std::move(argument), in, exec_context));
   }
   return BindNonRecursive(std::move(call),
                           /*insert_implicit_casts=*/true, exec_context);
@@ -469,14 +446,14 @@ Result<Expression> BindImpl(Expression expr, const TypeOrSchema& in,
 
 }  // namespace
 
-Result<Expression> Expression::Bind(const ValueDescr& in,
+Result<Expression> Expression::Bind(const TypeHolder& in,
                                     compute::ExecContext* exec_context) const {
-  return BindImpl(*this, *in.type, in.shape, exec_context);
+  return BindImpl(*this, in, exec_context);
 }
 
 Result<Expression> Expression::Bind(const Schema& in_schema,
                                     compute::ExecContext* exec_context) const {
-  return BindImpl(*this, in_schema, ValueDescr::ARRAY, exec_context);
+  return BindImpl(*this, in_schema, exec_context);
 }
 
 Result<ExecBatch> MakeExecBatch(const Schema& full_schema, const Datum& partial) {

@@ -51,7 +51,6 @@ struct NumericToStringCastFunctor {
   using FormatterType = StringFormatter<I>;
 
   static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-    DCHECK(out->is_array_data());
     const ArraySpan& input = batch[0].array;
     FormatterType formatter(input.type);
     BuilderType builder(input.type->Copy(), ctx->memory_pool());
@@ -79,7 +78,6 @@ struct TemporalToStringCastFunctor {
   using FormatterType = StringFormatter<I>;
 
   static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-    DCHECK(out->is_array_data());
     const ArraySpan& input = batch[0].array;
     FormatterType formatter(input.type);
     BuilderType builder(input.type->Copy(), ctx->memory_pool());
@@ -104,7 +102,6 @@ struct TemporalToStringCastFunctor<O, TimestampType> {
   using FormatterType = StringFormatter<TimestampType>;
 
   static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-    DCHECK(out->is_array_data());
     const ArraySpan& input = batch[0].array;
     const auto& timezone = GetInputTimezone(*input.type);
     const auto& ty = checked_cast<const TimestampType&>(*input.type);
@@ -265,7 +262,6 @@ template <typename O, typename I>
 enable_if_base_binary<I, Status> BinaryToBinaryCastExec(KernelContext* ctx,
                                                         const ExecSpan& batch,
                                                         ExecResult* out) {
-  DCHECK(out->is_array_data());
   const CastOptions& options = checked_cast<const CastState&>(*ctx->state()).options;
   const ArraySpan& input = batch[0].array;
 
@@ -287,7 +283,6 @@ enable_if_t<std::is_same<I, FixedSizeBinaryType>::value &&
                 !std::is_same<O, FixedSizeBinaryType>::value,
             Status>
 BinaryToBinaryCastExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-  DCHECK(out->is_array_data());
   const CastOptions& options = checked_cast<const CastState&>(*ctx->state()).options;
   const ArraySpan& input = batch[0].array;
 
@@ -339,7 +334,6 @@ enable_if_t<std::is_same<I, FixedSizeBinaryType>::value &&
                 std::is_same<O, FixedSizeBinaryType>::value,
             Status>
 BinaryToBinaryCastExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
-  DCHECK(out->is_array_data());
   const CastOptions& options = checked_cast<const CastState&>(*ctx->state()).options;
   const int32_t in_width = batch[0].type()->byte_width();
   const int32_t out_width =
@@ -363,17 +357,13 @@ void AddNumberToStringCasts(CastFunction* func) {
   auto out_ty = TypeTraits<OutType>::type_singleton();
 
   DCHECK_OK(func->AddKernel(Type::BOOL, {boolean()}, out_ty,
-                            TrivialScalarUnaryAsArraysExec(
-                                NumericToStringCastFunctor<OutType, BooleanType>::Exec,
-                                /*use_array_span=*/false),
+                            NumericToStringCastFunctor<OutType, BooleanType>::Exec,
                             NullHandling::COMPUTED_NO_PREALLOCATE));
 
   for (const std::shared_ptr<DataType>& in_ty : NumericTypes()) {
     DCHECK_OK(
         func->AddKernel(in_ty->id(), {in_ty}, out_ty,
-                        TrivialScalarUnaryAsArraysExec(
-                            GenerateNumeric<NumericToStringCastFunctor, OutType>(*in_ty),
-                            /*use_array_span=*/false),
+                        GenerateNumeric<NumericToStringCastFunctor, OutType>(*in_ty),
                         NullHandling::COMPUTED_NO_PREALLOCATE));
   }
 }
@@ -382,12 +372,10 @@ template <typename OutType>
 void AddTemporalToStringCasts(CastFunction* func) {
   auto out_ty = TypeTraits<OutType>::type_singleton();
   for (const std::shared_ptr<DataType>& in_ty : TemporalTypes()) {
-    DCHECK_OK(func->AddKernel(
-        in_ty->id(), {InputType(in_ty->id())}, out_ty,
-        TrivialScalarUnaryAsArraysExec(
-            GenerateTemporal<TemporalToStringCastFunctor, OutType>(*in_ty),
-            /*use_array_span=*/false),
-        NullHandling::COMPUTED_NO_PREALLOCATE));
+    DCHECK_OK(
+        func->AddKernel(in_ty->id(), {InputType(in_ty->id())}, out_ty,
+                        GenerateTemporal<TemporalToStringCastFunctor, OutType>(*in_ty),
+                        NullHandling::COMPUTED_NO_PREALLOCATE));
   }
 }
 
@@ -395,11 +383,9 @@ template <typename OutType, typename InType>
 void AddBinaryToBinaryCast(CastFunction* func) {
   auto out_ty = TypeTraits<OutType>::type_singleton();
 
-  DCHECK_OK(func->AddKernel(
-      InType::type_id, {InputType(InType::type_id)}, out_ty,
-      TrivialScalarUnaryAsArraysExec(BinaryToBinaryCastExec<OutType, InType>,
-                                     /*use_array_span=*/false),
-      NullHandling::COMPUTED_NO_PREALLOCATE));
+  DCHECK_OK(func->AddKernel(InType::type_id, {InputType(InType::type_id)}, out_ty,
+                            BinaryToBinaryCastExec<OutType, InType>,
+                            NullHandling::COMPUTED_NO_PREALLOCATE));
 }
 
 template <typename OutType>
@@ -443,9 +429,7 @@ std::vector<std::shared_ptr<CastFunction>> GetBinaryLikeCasts() {
   DCHECK_OK(cast_fsb->AddKernel(
       Type::FIXED_SIZE_BINARY, {InputType(Type::FIXED_SIZE_BINARY)},
       OutputType(FirstType),
-      TrivialScalarUnaryAsArraysExec(
-          BinaryToBinaryCastExec<FixedSizeBinaryType, FixedSizeBinaryType>,
-          /*use_array_span=*/false),
+      BinaryToBinaryCastExec<FixedSizeBinaryType, FixedSizeBinaryType>,
       NullHandling::COMPUTED_NO_PREALLOCATE));
 
   return {cast_binary, cast_large_binary, cast_string, cast_large_string, cast_fsb};

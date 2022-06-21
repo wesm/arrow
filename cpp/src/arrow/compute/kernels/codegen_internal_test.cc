@@ -28,7 +28,7 @@ namespace compute {
 namespace internal {
 
 TEST(TestDispatchBest, CastBinaryDecimalArgs) {
-  std::vector<ValueDescr> args;
+  std::vector<TypeHolder> args;
   std::vector<DecimalPromotion> modes = {
       DecimalPromotion::kAdd, DecimalPromotion::kMultiply, DecimalPromotion::kDivide};
 
@@ -36,15 +36,15 @@ TEST(TestDispatchBest, CastBinaryDecimalArgs) {
   for (auto mode : modes) {
     args = {decimal128(3, 2), float64()};
     ASSERT_OK(CastBinaryDecimalArgs(mode, &args));
-    AssertTypeEqual(args[0].type, float64());
-    AssertTypeEqual(args[1].type, float64());
+    AssertTypeEqual(*args[0].type, *float64());
+    AssertTypeEqual(*args[1].type, *float64());
   }
 
   // Integer -> decimal with common scale
   args = {decimal128(1, 0), int64()};
   ASSERT_OK(CastBinaryDecimalArgs(DecimalPromotion::kAdd, &args));
-  AssertTypeEqual(args[0].type, decimal128(1, 0));
-  AssertTypeEqual(args[1].type, decimal128(19, 0));
+  AssertTypeEqual(*args[0].type, *decimal128(1, 0));
+  AssertTypeEqual(*args[1].type, *decimal128(19, 0));
 
   // Add: rescale so all have common scale
   args = {decimal128(3, 2), decimal128(3, -2)};
@@ -54,64 +54,64 @@ TEST(TestDispatchBest, CastBinaryDecimalArgs) {
 }
 
 TEST(TestDispatchBest, CastDecimalArgs) {
-  std::vector<ValueDescr> args;
+  std::vector<TypeHolder> args;
 
   // Any float -> all float
   args = {decimal128(3, 2), float64()};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, float64());
-  AssertTypeEqual(args[1].type, float64());
+  AssertTypeEqual(*args[0].type, *float64());
+  AssertTypeEqual(*args[1].type, *float64());
 
   args = {float32(), float64(), decimal128(3, 2)};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, float64());
-  AssertTypeEqual(args[1].type, float64());
+  AssertTypeEqual(*args[0].type, *float64());
+  AssertTypeEqual(*args[1].type, *float64());
   AssertTypeEqual(args[2].type, float64());
 
   // Promote to common decimal width
   args = {decimal128(3, 2), decimal256(3, 2)};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal256(3, 2));
-  AssertTypeEqual(args[1].type, decimal256(3, 2));
+  AssertTypeEqual(*args[0].type, *decimal256(3, 2));
+  AssertTypeEqual(*args[1].type, *decimal256(3, 2));
 
   // Rescale so all have common scale/precision
   args = {decimal128(3, 2), decimal128(3, 0)};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal128(5, 2));
-  AssertTypeEqual(args[1].type, decimal128(5, 2));
+  AssertTypeEqual(*args[0].type, *decimal128(5, 2));
+  AssertTypeEqual(*args[1].type, *decimal128(5, 2));
 
   args = {decimal128(3, 2), decimal128(3, -2)};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal128(7, 2));
-  AssertTypeEqual(args[1].type, decimal128(7, 2));
+  AssertTypeEqual(*args[0].type, *decimal128(7, 2));
+  AssertTypeEqual(*args[1].type, *decimal128(7, 2));
 
   args = {decimal128(3, 0), decimal128(3, 1), decimal128(3, 2)};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal128(5, 2));
-  AssertTypeEqual(args[1].type, decimal128(5, 2));
-  AssertTypeEqual(args[2].type, decimal128(5, 2));
+  AssertTypeEqual(*args[0].type, *decimal128(5, 2));
+  AssertTypeEqual(*args[1].type, *decimal128(5, 2));
+  AssertTypeEqual(*args[2].type, *decimal128(5, 2));
 
   // Integer -> decimal with appropriate precision
   args = {decimal128(3, 0), int64()};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal128(19, 0));
-  AssertTypeEqual(args[1].type, decimal128(19, 0));
+  AssertTypeEqual(*args[0].type, *decimal128(19, 0));
+  AssertTypeEqual(*args[1].type, *decimal128(19, 0));
 
   args = {decimal128(3, 1), int64()};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal128(20, 1));
-  AssertTypeEqual(args[1].type, decimal128(20, 1));
+  AssertTypeEqual(*args[0].type, *decimal128(20, 1));
+  AssertTypeEqual(*args[1].type, *decimal128(20, 1));
 
   args = {decimal128(3, -1), int64()};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal128(19, 0));
-  AssertTypeEqual(args[1].type, decimal128(19, 0));
+  AssertTypeEqual(*args[0].type, *decimal128(19, 0));
+  AssertTypeEqual(*args[1].type, *decimal128(19, 0));
 
   // Overflow decimal128 max precision -> promote to decimal256
   args = {decimal128(38, 0), decimal128(37, 2)};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal256(40, 2));
-  AssertTypeEqual(args[1].type, decimal256(40, 2));
+  AssertTypeEqual(*args[0].type, *decimal256(40, 2));
+  AssertTypeEqual(*args[1].type, *decimal256(40, 2));
 
   // Overflow decimal256 max precision
   args = {decimal256(76, 0), decimal256(75, 1)};
@@ -124,13 +124,13 @@ TEST(TestDispatchBest, CastDecimalArgs) {
   // Incompatible, no cast
   args = {decimal256(3, 2), float64(), utf8()};
   ASSERT_OK(CastDecimalArgs(args.data(), args.size()));
-  AssertTypeEqual(args[0].type, decimal256(3, 2));
-  AssertTypeEqual(args[1].type, float64());
-  AssertTypeEqual(args[2].type, utf8());
+  AssertTypeEqual(*args[0].type, *decimal256(3, 2));
+  AssertTypeEqual(*args[1].type, *float64());
+  AssertTypeEqual(*args[2].type, *utf8());
 }
 
 TEST(TestDispatchBest, CommonTemporal) {
-  std::vector<ValueDescr> args;
+  std::vector<TypeHolder> args;
 
   args = {timestamp(TimeUnit::SECOND), timestamp(TimeUnit::NANO)};
   AssertTypeEqual(timestamp(TimeUnit::NANO), CommonTemporal(args.data(), args.size()));
@@ -161,7 +161,7 @@ TEST(TestDispatchBest, CommonTemporal) {
 }
 
 TEST(TestDispatchBest, CommonTemporalResolution) {
-  std::vector<ValueDescr> args;
+  std::vector<TypeHolder> args;
   std::string tz = "Pacific/Marquesas";
   TimeUnit::type ty;
 
@@ -240,7 +240,7 @@ TEST(TestDispatchBest, CommonTemporalResolution) {
 }
 
 TEST(TestDispatchBest, ReplaceTemporalTypes) {
-  std::vector<ValueDescr> args;
+  std::vector<TypeHolder> args;
   std::string tz = "Pacific/Marquesas";
   TimeUnit::type ty;
 

@@ -3389,7 +3389,7 @@ TEST(TestChoose, FixedSizeBinary) {
 
 TEST(TestChooseKernel, DispatchBest) {
   ASSERT_OK_AND_ASSIGN(auto function, GetFunctionRegistry()->GetFunction("choose"));
-  auto Check = [&](std::vector<ValueDescr> original_values) {
+  auto Check = [&](std::vector<TypeHolder> original_values) {
     auto values = original_values;
     ARROW_EXPECT_OK(function->DispatchBest(&values));
     return values;
@@ -3400,12 +3400,12 @@ TEST(TestChooseKernel, DispatchBest) {
   for (auto ty :
        {int8(), int16(), int32(), int64(), uint8(), uint16(), uint32(), uint64()}) {
     // Index always promoted to int64
-    EXPECT_EQ((std::vector<ValueDescr>{int64(), ty}), Check({ty, ty}));
-    EXPECT_EQ((std::vector<ValueDescr>{int64(), int64(), int64()}),
+    EXPECT_EQ((std::vector<TypeHolder>{int64(), ty}), Check({ty, ty}));
+    EXPECT_EQ((std::vector<TypeHolder>{int64(), int64(), int64()}),
               Check({ty, ty, int64()}));
   }
   // Other arguments promoted separately from index
-  EXPECT_EQ((std::vector<ValueDescr>{int64(), int32(), int32()}),
+  EXPECT_EQ((std::vector<TypeHolder>{int64(), int32(), int32()}),
             Check({int8(), int32(), uint8()}));
 }
 

@@ -376,9 +376,8 @@ struct ReplaceMask {
   }
 
   static std::shared_ptr<KernelSignature> GetSignature(detail::GetTypeId get_id) {
-    return KernelSignature::Make(
-        {InputType::Array(get_id.id), InputType(boolean()), InputType(get_id.id)},
-        OutputType(FirstType));
+    return KernelSignature::Make({InputType(get_id.id), boolean(), InputType(get_id.id)},
+                                 FirstType);
   }
 };
 
@@ -668,7 +667,7 @@ struct FillNullForward {
   }
 
   static std::shared_ptr<KernelSignature> GetSignature(detail::GetTypeId get_id) {
-    return KernelSignature::Make({InputType::Array(get_id.id)}, OutputType(FirstType));
+    return KernelSignature::Make({InputType(get_id.id)}, FirstType);
   }
 };
 
@@ -748,7 +747,7 @@ struct FillNullBackward {
   }
 
   static std::shared_ptr<KernelSignature> GetSignature(detail::GetTypeId get_id) {
-    return KernelSignature::Make({InputType::Array(get_id.id)}, OutputType(FirstType));
+    return KernelSignature::Make({InputType(get_id.id)}, FirstType);
   }
 };
 

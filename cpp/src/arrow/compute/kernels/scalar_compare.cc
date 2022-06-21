@@ -192,50 +192,50 @@ void AddGenericCompare(const std::shared_ptr<DataType>& ty, ScalarFunction* func
 struct CompareFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
-    if (HasDecimal(*values)) {
-      RETURN_NOT_OK(CastBinaryDecimalArgs(DecimalPromotion::kAdd, values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
+    if (HasDecimal(*types)) {
+      RETURN_NOT_OK(CastBinaryDecimalArgs(DecimalPromotion::kAdd, types));
     }
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
-    ReplaceNullWithOtherType(values);
+    EnsureDictionaryDecoded(types);
+    ReplaceNullWithOtherType(types);
 
-    if (auto type = CommonNumeric(*values)) {
-      ReplaceTypes(type, values);
-    } else if (auto type = CommonTemporal(values->data(), values->size())) {
-      ReplaceTypes(type, values);
-    } else if (auto type = CommonBinary(values->data(), values->size())) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonNumeric(*types)) {
+      ReplaceTypes(type, types);
+    } else if (auto type = CommonTemporal(types->data(), types->size())) {
+      ReplaceTypes(type, types);
+    } else if (auto type = CommonBinary(types->data(), types->size())) {
+      ReplaceTypes(type, types);
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 
 struct VarArgsCompareFunction : ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
+    EnsureDictionaryDecoded(types);
 
-    if (auto type = CommonNumeric(*values)) {
-      ReplaceTypes(type, values);
-    } else if (auto type = CommonTemporal(values->data(), values->size())) {
-      ReplaceTypes(type, values);
+    if (auto type = CommonNumeric(*types)) {
+      ReplaceTypes(type, types);
+    } else if (auto type = CommonTemporal(types->data(), types->size())) {
+      ReplaceTypes(type, types);
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 
@@ -376,7 +376,6 @@ struct ScalarMinMax {
 
   static Status Exec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out) {
     const ElementWiseAggregateOptions& options = MinMaxState::Get(ctx);
-    const auto descrs = batch.GetDescriptors();
     const size_t scalar_count = static_cast<size_t>(
         std::count_if(batch.values.begin(), batch.values.end(),
                       [](const ExecValue& v) { return v.is_scalar(); }));
@@ -684,20 +683,20 @@ struct FixedSizeBinaryScalarMinMax {
   }
 };
 
-Result<ValueDescr> ResolveMinOrMaxOutputType(KernelContext*,
-                                             const std::vector<ValueDescr>& args) {
-  if (args.empty()) {
+Result<TypeHolder> ResolveMinOrMaxOutputType(KernelContext*,
+                                             const std::vector<TypeHolder>& types) {
+  if (types.empty()) {
     return null();
   }
-  auto first_type = args[0].type;
-  for (size_t i = 1; i < args.size(); ++i) {
-    auto type = args[i].type;
+  auto first_type = types[0].type;
+  for (size_t i = 1; i < types.size(); ++i) {
+    auto type = types[i].type;
     if (*type != *first_type) {
       return Status::NotImplemented(
           "Different input types not supported for {min, max}_element_wise");
     }
   }
-  return ValueDescr(first_type, GetBroadcastShape(args));
+  return first_type;
 }
 
 template <typename Op>

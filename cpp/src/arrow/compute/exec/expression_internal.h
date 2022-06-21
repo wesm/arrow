@@ -41,21 +41,22 @@ inline const Expression::Call* CallNotNull(const Expression& expr) {
   return call;
 }
 
-inline std::vector<ValueDescr> GetDescriptors(const std::vector<Expression>& exprs) {
-  std::vector<ValueDescr> descrs(exprs.size());
+// TODO(wesm): would DataType* be sufficient here or is ownership needed?
+inline std::vector<TypeHolder> GetTypes(const std::vector<Expression>& exprs) {
+  std::vector<TypeHolder> types(exprs.size());
   for (size_t i = 0; i < exprs.size(); ++i) {
     DCHECK(exprs[i].IsBound());
-    descrs[i] = exprs[i].descr();
+    types[i] = exprs[i].type();
   }
-  return descrs;
+  return types;
 }
 
-inline std::vector<ValueDescr> GetDescriptors(const std::vector<Datum>& values) {
-  std::vector<ValueDescr> descrs(values.size());
+inline std::vector<TypeHolder> GetTypes(const std::vector<Datum>& values) {
+  std::vector<TypeHolder> types(values.size());
   for (size_t i = 0; i < values.size(); ++i) {
-    descrs[i] = values[i].descr();
+    types[i] = values[i].type();
   }
-  return descrs;
+  return types;
 }
 
 struct Comparison {

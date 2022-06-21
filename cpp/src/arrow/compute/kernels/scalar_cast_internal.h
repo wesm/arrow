@@ -46,7 +46,7 @@ Status CastFromExtension(KernelContext* ctx, const ExecSpan& batch, ExecResult* 
 
 // Utility for numeric casts
 void CastNumberToNumberUnsafe(Type::type in_type, Type::type out_type,
-                              const ExecValue& input, ExecResult* out);
+                              const ArraySpan& input, ArraySpan* out);
 
 // ----------------------------------------------------------------------
 // Dictionary to other things
@@ -62,9 +62,8 @@ Status CastFromNull(KernelContext* ctx, const ExecSpan& batch, ExecResult* out);
 // wrapping with TrivialScalarUnaryAsArraysExec.
 template <typename InType, typename OutType>
 void AddSimpleCast(InputType in_ty, OutputType out_ty, CastFunction* func) {
-  DCHECK_OK(func->AddKernel(
-      InType::type_id, {in_ty}, out_ty,
-      TrivialScalarUnaryAsArraysExec(CastFunctor<OutType, InType>::Exec)));
+  DCHECK_OK(func->AddKernel(InType::type_id, {in_ty}, out_ty,
+                            CastFunctor<OutType, InType>::Exec));
 }
 
 Status ZeroCopyCastExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* out);
@@ -72,10 +71,9 @@ Status ZeroCopyCastExec(KernelContext* ctx, const ExecSpan& batch, ExecResult* o
 void AddZeroCopyCast(Type::type in_type_id, InputType in_type, OutputType out_type,
                      CastFunction* func);
 
-// OutputType::Resolver that returns a descr with the shape of the input
-// argument and the type from CastOptions
-Result<ValueDescr> ResolveOutputFromOptions(KernelContext* ctx,
-                                            const std::vector<ValueDescr>& args);
+// OutputType::Resolver that returns a type the type from CastOptions
+Result<TypeHolder> ResolveOutputFromOptions(KernelContext* ctx,
+                                            const std::vector<TypeHolder>& args);
 
 ARROW_EXPORT extern OutputType kOutputTargetType;
 

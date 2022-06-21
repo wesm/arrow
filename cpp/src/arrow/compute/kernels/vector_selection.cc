@@ -2468,9 +2468,9 @@ std::shared_ptr<VectorFunction> MakeIndicesNonZeroFunction(std::string name,
 void RegisterVectorSelection(FunctionRegistry* registry) {
   // Filter kernels
   std::vector<SelectionKernelDescr> filter_kernel_descrs = {
-      {InputType(match::Primitive(), ValueDescr::ARRAY), PrimitiveFilter},
-      {InputType(match::BinaryLike(), ValueDescr::ARRAY), BinaryFilter},
-      {InputType(match::LargeBinaryLike(), ValueDescr::ARRAY), BinaryFilter},
+      {InputType(match::Primitive()), PrimitiveFilter},
+      {InputType(match::BinaryLike()), BinaryFilter},
+      {InputType(match::LargeBinaryLike()), BinaryFilter},
       {InputType::Array(Type::FIXED_SIZE_BINARY), FilterExec<FSBImpl>},
       {InputType::Array(null()), NullFilter},
       {InputType::Array(Type::DECIMAL128), FilterExec<FSBImpl>},
@@ -2496,11 +2496,9 @@ void RegisterVectorSelection(FunctionRegistry* registry) {
 
   // Take kernels
   std::vector<SelectionKernelDescr> take_kernel_descrs = {
-      {InputType(match::Primitive(), ValueDescr::ARRAY), PrimitiveTake},
-      {InputType(match::BinaryLike(), ValueDescr::ARRAY),
-       TakeExec<VarBinaryImpl<BinaryType>>},
-      {InputType(match::LargeBinaryLike(), ValueDescr::ARRAY),
-       TakeExec<VarBinaryImpl<LargeBinaryType>>},
+      {InputType(match::Primitive()), PrimitiveTake},
+      {InputType(match::BinaryLike()), TakeExec<VarBinaryImpl<BinaryType>>},
+      {InputType(match::LargeBinaryLike()), TakeExec<VarBinaryImpl<LargeBinaryType>>},
       {InputType::Array(Type::FIXED_SIZE_BINARY), TakeExec<FSBImpl>},
       {InputType::Array(null()), NullTake},
       {InputType::Array(Type::DECIMAL128), TakeExec<FSBImpl>},
@@ -2519,10 +2517,9 @@ void RegisterVectorSelection(FunctionRegistry* registry) {
   VectorKernel take_base;
   take_base.init = TakeState::Init;
   take_base.can_execute_chunkwise = false;
-  RegisterSelectionFunction(
-      "array_take", array_take_doc, take_base,
-      /*selection_type=*/InputType(match::Integer(), ValueDescr::ARRAY),
-      take_kernel_descrs, GetDefaultTakeOptions(), registry);
+  RegisterSelectionFunction("array_take", array_take_doc, take_base,
+                            /*selection_type=*/InputType(match::Integer()),
+                            take_kernel_descrs, GetDefaultTakeOptions(), registry);
 
   DCHECK_OK(registry->AddFunction(std::make_shared<TakeMetaFunction>()));
 

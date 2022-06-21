@@ -177,8 +177,8 @@ Status CastFunction::AddKernel(Type::type in_type_id, std::vector<InputType> in_
 }
 
 Result<const Kernel*> CastFunction::DispatchExact(
-    const std::vector<ValueDescr>& values) const {
-  RETURN_NOT_OK(CheckArity(values));
+    const std::vector<TypeHolder>& values) const {
+  RETURN_NOT_OK(CheckArity(values.size()));
 
   std::vector<const ScalarKernel*> candidate_kernels;
   for (const auto& kernel : kernels_) {

@@ -465,8 +465,8 @@ struct ModeExecutorChunked {
   }
 };
 
-Result<ValueDescr> ModeType(KernelContext*, const std::vector<ValueDescr>& descrs) {
-  return ValueDescr::Array(
+Result<TypeHolder> ModeType(KernelContext*, const std::vector<TypeHolder>& types) {
+  return TypeHolder(
       struct_({field(kModeFieldName, descrs[0].type), field(kCountFieldName, int64())}));
 }
 
@@ -485,8 +485,7 @@ VectorKernel NewModeKernel(const std::shared_ptr<DataType>& in_type, ArrayKernel
     default: {
       auto out_type =
           struct_({field(kModeFieldName, in_type), field(kCountFieldName, int64())});
-      kernel.signature = KernelSignature::Make({InputType(in_type->id())},
-                                               ValueDescr::Array(std::move(out_type)));
+      kernel.signature = KernelSignature::Make({in_type->id()}, std::move(out_type));
       break;
     }
   }

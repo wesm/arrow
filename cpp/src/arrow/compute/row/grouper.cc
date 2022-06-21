@@ -45,15 +45,16 @@ namespace compute {
 namespace {
 
 struct GrouperImpl : Grouper {
-  static Result<std::unique_ptr<GrouperImpl>> Make(const std::vector<ValueDescr>& keys,
-                                                   ExecContext* ctx) {
+  static Result<std::unique_ptr<GrouperImpl>> Make(
+      const std::vector<TypeHolder>& key_types, ExecContext* ctx) {
     auto impl = ::arrow::internal::make_unique<GrouperImpl>();
 
-    impl->encoders_.resize(keys.size());
+    impl->encoders_.resize(key_types.size());
     impl->ctx_ = ctx;
 
-    for (size_t i = 0; i < keys.size(); ++i) {
-      const auto& key = keys[i].type;
+    for (size_t i = 0; i < key_types.size(); ++i) {
+      // TODO(wesm): eliminate this probably unneeded shared_ptr copy
+      std::shared_ptr<DataType> key = key_types[i].GetSharedPtr();
 
       if (key->id() == Type::BOOL) {
         impl->encoders_[i] =
@@ -198,11 +199,11 @@ struct GrouperFastImpl : Grouper {
   static constexpr int kBitmapPaddingForSIMD = 64;  // bits
   static constexpr int kPaddingForSIMD = 32;        // bytes
 
-  static bool CanUse(const std::vector<ValueDescr>& keys) {
+  static bool CanUse(const std::vector<TypeHolder>& key_types) {
 #if ARROW_LITTLE_ENDIAN
-    for (size_t i = 0; i < keys.size(); ++i) {
-      const auto& key = keys[i].type;
-      if (is_large_binary_like(key->id())) {
+    for (size_t i = 0; i < types.size(); ++i) {
+      Type::type key_type_id = key_types[i].type->id();
+      if (is_large_binary_like(key_type_id)) {
         return false;
       }
     }
@@ -213,7 +214,7 @@ struct GrouperFastImpl : Grouper {
   }
 
   static Result<std::unique_ptr<GrouperFastImpl>> Make(
-      const std::vector<ValueDescr>& keys, ExecContext* ctx) {
+      const std::vector<TypeHolder>& keys, ExecContext* ctx) {
     auto impl = ::arrow::internal::make_unique<GrouperFastImpl>();
     impl->ctx_ = ctx;
 
@@ -538,12 +539,12 @@ struct GrouperFastImpl : Grouper {
 
 }  // namespace
 
-Result<std::unique_ptr<Grouper>> Grouper::Make(const std::vector<ValueDescr>& descrs,
+Result<std::unique_ptr<Grouper>> Grouper::Make(const std::vector<TypeHolder>& key_types,
                                                ExecContext* ctx) {
-  if (GrouperFastImpl::CanUse(descrs)) {
-    return GrouperFastImpl::Make(descrs, ctx);
+  if (GrouperFastImpl::CanUse(key_types)) {
+    return GrouperFastImpl::Make(key_types, ctx);
   }
-  return GrouperImpl::Make(descrs, ctx);
+  return GrouperImpl::Make(key_types, ctx);
 }
 
 Result<std::shared_ptr<ListArray>> Grouper::ApplyGroupings(const ListArray& groupings,

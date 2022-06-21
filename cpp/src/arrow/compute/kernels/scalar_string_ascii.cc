@@ -149,13 +149,13 @@ struct FixedSizeBinaryTransformExecWithState
     return Execute(ctx, &transform, batch, out);
   }
 
-  static Result<ValueDescr> OutputType(KernelContext* ctx,
-                                       const std::vector<ValueDescr>& descrs) {
-    DCHECK_EQ(1, descrs.size());
+  static Result<TypeHolder> OutputType(KernelContext* ctx,
+                                       const std::vector<TypeHolder>& types) {
+    DCHECK_EQ(1, types.size());
     const auto& options = State::Get(ctx);
-    const int32_t input_width = descrs[0].type->byte_width();
+    const int32_t input_width = types[0].type->byte_width();
     const int32_t output_width = StringTransform::FixedOutputSize(options, input_width);
-    return ValueDescr(fixed_size_binary(output_width), descrs[0].shape);
+    return fixed_size_binary(output_width);
   }
 };
 
@@ -2305,19 +2305,20 @@ struct ExtractRegexData {
     return std::move(data);
   }
 
-  Result<ValueDescr> ResolveOutputType(const std::vector<ValueDescr>& args) const {
-    const auto& input_type = args[0].type;
+  Result<TypeHolder> ResolveOutputType(const std::vector<TypeHolder>& types) const {
+    const DataType* input_type = types[0].type;
     if (input_type == nullptr) {
       // No input type specified => propagate shape
-      return args[0];
+      return types[0];
     }
     // Input type is either [Large]Binary or [Large]String and is also the type
     // of each field in the output struct type.
     DCHECK(is_base_binary_like(input_type->id()));
     FieldVector fields;
     fields.reserve(group_names.size());
+    std::shared_ptr<DataType> owned_type = input_type->Copy();
     std::transform(group_names.begin(), group_names.end(), std::back_inserter(fields),
-                   [&](const std::string& name) { return field(name, input_type); });
+                   [&](const std::string& name) { return field(name, owned_type); });
     return struct_(std::move(fields));
   }
 
@@ -2326,11 +2327,11 @@ struct ExtractRegexData {
       : regex(new RE2(pattern, MakeRE2Options(is_utf8))) {}
 };
 
-Result<ValueDescr> ResolveExtractRegexOutput(KernelContext* ctx,
-                                             const std::vector<ValueDescr>& args) {
+Result<TypeHolder> ResolveExtractRegexOutput(KernelContext* ctx,
+                                             const std::vector<TypeHolder>& types) {
   ExtractRegexOptions options = ExtractRegexState::Get(ctx);
   ARROW_ASSIGN_OR_RAISE(auto data, ExtractRegexData::Make(options));
-  return data.ResolveOutputType(args);
+  return data.ResolveOutputType(types);
 }
 
 struct ExtractRegexBase {
@@ -3300,22 +3301,22 @@ void AddAsciiStringJoin(FunctionRegistry* registry) {
 struct ScalarCTypeToInt64Function : public ScalarFunction {
   using ScalarFunction::ScalarFunction;
 
-  Result<const Kernel*> DispatchBest(std::vector<ValueDescr>* values) const override {
-    RETURN_NOT_OK(CheckArity(*values));
+  Result<const Kernel*> DispatchBest(std::vector<TypeHolder>* types) const override {
+    RETURN_NOT_OK(CheckArity(types->size()));
 
     using arrow::compute::detail::DispatchExactImpl;
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
 
-    EnsureDictionaryDecoded(values);
+    EnsureDictionaryDecoded(types);
 
-    for (auto& descr : *values) {
-      if (is_integer(descr.type->id())) {
-        descr.type = int64();
+    for (TypeHolder& type : *types) {
+      if (is_integer(type.type->id())) {
+        *type = int64();
       }
     }
 
-    if (auto kernel = DispatchExactImpl(this, *values)) return kernel;
-    return arrow::compute::detail::NoMatchingKernel(this, *values);
+    if (auto kernel = DispatchExactImpl(this, *types)) return kernel;
+    return arrow::compute::detail::NoMatchingKernel(this, *types);
   }
 };
 

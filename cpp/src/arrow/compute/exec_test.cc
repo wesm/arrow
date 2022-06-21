@@ -728,10 +728,10 @@ TEST_F(TestExecBatchIterator, Basics) {
   ASSERT_EQ(3, batch.num_values());
   ASSERT_EQ(length, batch.length);
 
-  std::vector<ValueDescr> descrs = batch.GetDescriptors();
-  ASSERT_EQ(ValueDescr::Array(int32()), descrs[0]);
-  ASSERT_EQ(ValueDescr::Array(float64()), descrs[1]);
-  ASSERT_EQ(ValueDescr::Scalar(int32()), descrs[2]);
+  std::vector<TypeHolder> types = batch.Types();
+  ASSERT_EQ(TypeHolder(int32()), descrs[0]);
+  ASSERT_EQ(TypeHolder(float64()), descrs[1]);
+  ASSERT_EQ(TypeHolder(int32()), descrs[2]);
 
   AssertArraysEqual(*args[0].make_array(), *batch[0].make_array());
   AssertArraysEqual(*args[1].make_array(), *batch[1].make_array());
@@ -795,13 +795,12 @@ TEST_F(TestExecBatchIterator, ZeroLengthInputs) {
 class TestExecSpanIterator : public TestComputeInternals {
  public:
   void SetupIterator(const ExecBatch& batch,
-                     ValueDescr::Shape output_shape = ValueDescr::ARRAY,
                      int64_t max_chunksize = kDefaultMaxChunksize) {
-    ASSERT_OK(iterator_.Init(batch, output_shape, max_chunksize));
+    ASSERT_OK(iterator_.Init(batch, max_chunksize));
   }
   void CheckIteration(const ExecBatch& input, int chunksize,
                       const std::vector<int>& ex_batch_sizes) {
-    SetupIterator(input, ValueDescr::ARRAY, chunksize);
+    SetupIterator(input, chunksize);
     ExecSpan batch;
     int64_t position = 0;
     for (size_t i = 0; i < ex_batch_sizes.size(); ++i) {
@@ -902,7 +901,7 @@ TEST_F(TestExecSpanIterator, ZeroLengthInputs) {
 
   auto CheckArgs = [&](const ExecBatch& batch) {
     ExecSpanIterator iterator;
-    ASSERT_OK(iterator.Init(batch, ValueDescr::ARRAY));
+    ASSERT_OK(iterator.Init(batch));
     ExecSpan iter_span;
     ASSERT_FALSE(iterator.Next(&iter_span));
   };

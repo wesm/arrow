@@ -93,7 +93,7 @@ class CastFunction : public ScalarFunction {
   Status AddKernel(Type::type in_type_id, ScalarKernel kernel);
 
   Result<const Kernel*> DispatchExact(
-      const std::vector<ValueDescr>& values) const override;
+      const std::vector<TypeHolder>& types) const override;
 
  private:
   std::vector<Type::type> in_type_ids_;
@@ -153,14 +153,14 @@ Result<Datum> Cast(const Datum& value, std::shared_ptr<DataType> to_type,
 
 /// \brief Cast several values simultaneously. Safe cast options are used.
 /// \param[in] values datums to cast
-/// \param[in] descrs ValueDescrs to cast to
+/// \param[in] types the types to cast to
 /// \param[in] ctx the function execution context, optional
 /// \return the resulting datums
 ///
 /// \since 4.0.0
 /// \note API not yet finalized
 ARROW_EXPORT
-Result<std::vector<Datum>> Cast(std::vector<Datum> values, std::vector<ValueDescr> descrs,
+Result<std::vector<Datum>> Cast(std::vector<Datum> values, std::vector<TypeHolder> types,
                                 ExecContext* ctx = NULLPTR);
 
 }  // namespace compute

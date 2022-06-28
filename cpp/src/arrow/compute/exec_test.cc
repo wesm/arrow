@@ -729,9 +729,9 @@ TEST_F(TestExecBatchIterator, Basics) {
   ASSERT_EQ(length, batch.length);
 
   std::vector<TypeHolder> types = batch.Types();
-  ASSERT_EQ(TypeHolder(int32()), descrs[0]);
-  ASSERT_EQ(TypeHolder(float64()), descrs[1]);
-  ASSERT_EQ(TypeHolder(int32()), descrs[2]);
+  ASSERT_EQ(int32(), types[0]);
+  ASSERT_EQ(float64(), types[1]);
+  ASSERT_EQ(int32(), types[2]);
 
   AssertArraysEqual(*args[0].make_array(), *batch[0].make_array());
   AssertArraysEqual(*args[1].make_array(), *batch[1].make_array());

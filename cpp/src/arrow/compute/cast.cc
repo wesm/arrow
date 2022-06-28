@@ -177,18 +177,18 @@ Status CastFunction::AddKernel(Type::type in_type_id, std::vector<InputType> in_
 }
 
 Result<const Kernel*> CastFunction::DispatchExact(
-    const std::vector<TypeHolder>& values) const {
-  RETURN_NOT_OK(CheckArity(values.size()));
+    const std::vector<TypeHolder>& types) const {
+  RETURN_NOT_OK(CheckArity(types.size()));
 
   std::vector<const ScalarKernel*> candidate_kernels;
   for (const auto& kernel : kernels_) {
-    if (kernel.signature->MatchesInputs(values)) {
+    if (kernel.signature->MatchesInputs(types)) {
       candidate_kernels.push_back(&kernel);
     }
   }
 
   if (candidate_kernels.size() == 0) {
-    return Status::NotImplemented("Unsupported cast from ", values[0].type->ToString(),
+    return Status::NotImplemented("Unsupported cast from ", types[0].type->ToString(),
                                   " to ", ToTypeName(out_type_id_), " using function ",
                                   this->name());
   }
@@ -253,19 +253,14 @@ bool CanCast(const DataType& from_type, const DataType& to_type) {
   return false;
 }
 
-Result<std::vector<Datum>> Cast(std::vector<Datum> datums, std::vector<ValueDescr> descrs,
+Result<std::vector<Datum>> Cast(std::vector<Datum> datums, std::vector<TypeHolder> types,
                                 ExecContext* ctx) {
   for (size_t i = 0; i != datums.size(); ++i) {
-    if (descrs[i] != datums[i].descr()) {
-      if (descrs[i].shape != datums[i].shape()) {
-        return Status::NotImplemented("casting between Datum shapes");
-      }
-
-      ARROW_ASSIGN_OR_RAISE(datums[i],
-                            Cast(datums[i], CastOptions::Safe(descrs[i].type), ctx));
+    if (types[i] != datums[i].type()) {
+      ARROW_ASSIGN_OR_RAISE(
+          datums[i], Cast(datums[i], CastOptions::Safe(types[i].GetSharedPtr()), ctx));
     }
   }
-
   return datums;
 }
 

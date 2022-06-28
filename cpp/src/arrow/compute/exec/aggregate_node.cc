@@ -124,10 +124,10 @@ class ScalarAggregateNode : public ExecNode {
 
       // pick one to resolve the kernel signature
       kernel_ctx.SetState(states[i][0].get());
-      ARROW_ASSIGN_OR_RAISE(
-          auto descr, kernels[i]->signature->out_type().Resolve(&kernel_ctx, {in_type}));
+      ARROW_ASSIGN_OR_RAISE(auto out_type, kernels[i]->signature->out_type().Resolve(
+                                               &kernel_ctx, {in_type}));
 
-      fields[i] = field(aggregate_options.aggregates[i].name, std::move(descr.type));
+      fields[i] = field(aggregate_options.aggregates[i].name, out_type.GetSharedPtr());
     }
 
     return plan->EmplaceNode<ScalarAggregateNode>(

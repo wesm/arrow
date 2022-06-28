@@ -370,7 +370,7 @@ const TypeMatcher& InputType::type_matcher() const {
 std::string TypeHolder::ToString(const std::vector<TypeHolder>& types) {
   std::stringstream ss;
   ss << "(";
-  for (size_t i = 0; i < descrs.size(); ++i) {
+  for (size_t i = 0; i < types.size(); ++i) {
     if (i > 0) {
       ss << ", ";
     }

@@ -1257,11 +1257,12 @@ struct ArithmeticDecimalToFloatingPointFunction : public ArithmeticFunction {
       ReplaceNullWithOtherType(types);
     }
 
-    for (auto& descr : *types) {
-      if (is_decimal(descr.type->id())) {
-        descr.type = float64();
+    for (size_t i = 0; i < types->size(); ++i) {
+      if (is_decimal((*types)[i].type->id())) {
+        (*types)[i] = float64();
       }
     }
+
     if (auto type = CommonNumeric(*types)) {
       ReplaceTypes(type, types);
     }
@@ -1288,11 +1289,12 @@ struct ArithmeticIntegerToFloatingPointFunction : public ArithmeticFunction {
       ReplaceNullWithOtherType(types);
     }
 
-    for (auto& descr : *types) {
-      if (is_integer(descr.type->id())) {
-        descr.type = float64();
+    for (size_t i = 0; i < types->size(); ++i) {
+      if (is_integer((*types)[i].type->id())) {
+        (*types)[i] = float64();
       }
     }
+
     if (auto type = CommonNumeric(*types)) {
       ReplaceTypes(type, types);
     }
@@ -1318,11 +1320,12 @@ struct ArithmeticFloatingPointFunction : public ArithmeticFunction {
       ReplaceNullWithOtherType(types);
     }
 
-    for (auto& descr : *types) {
-      if (is_integer(descr.type->id()) || is_decimal(descr.type->id())) {
-        descr.type = float64();
+    for (size_t i = 0; i < types->size(); ++i) {
+      if (is_integer((*types)[i].type->id()) || is_decimal((*types)[i].type->id())) {
+        (*types)[i] = float64();
       }
     }
+
     if (auto type = CommonNumeric(*types)) {
       ReplaceTypes(type, types);
     }

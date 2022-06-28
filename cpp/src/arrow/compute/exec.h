@@ -239,7 +239,7 @@ struct ARROW_EXPORT ExecBatch {
   std::vector<TypeHolder> GetTypes() const {
     std::vector<TypeHolder> result;
     for (const auto& value : this->values) {
-      result.emplace_back(value.descr());
+      result.emplace_back(value.type());
     }
     return result;
   }
@@ -405,7 +405,7 @@ struct ARROW_EXPORT ExecSpan {
   std::vector<TypeHolder> GetTypes() const {
     std::vector<TypeHolder> result;
     for (const auto& value : this->values) {
-      result.emplace_back(value.descr());
+      result.emplace_back(value.type());
     }
     return result;
   }

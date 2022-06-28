@@ -467,7 +467,7 @@ struct ModeExecutorChunked {
 
 Result<TypeHolder> ModeType(KernelContext*, const std::vector<TypeHolder>& types) {
   return TypeHolder(
-      struct_({field(kModeFieldName, descrs[0].type), field(kCountFieldName, int64())}));
+      struct_({field(kModeFieldName, types[0].type), field(kCountFieldName, int64())}));
 }
 
 VectorKernel NewModeKernel(const std::shared_ptr<DataType>& in_type, ArrayKernelExec exec,
